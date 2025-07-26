@@ -1,8 +1,9 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, JSONResponse
 import os
 import time
 import json
+    
 
 from agents.classifier import split_pdf_by_classification
 from agents.syllabus_analyzer import extract_syllabus_with_llm
@@ -78,3 +79,23 @@ async def predict_question_paper(file: UploadFile = File(...)):
     
     # 7. Return only the predicted question paper as plain text
     return pred_text
+
+
+@app.get("/latest-prediction/", response_class=JSONResponse)
+def get_latest_prediction():
+    outputs_folder = "outputs"
+    try:
+        # Find all prediction files in outputs as .json files, sort by time
+        files = [f for f in os.listdir(outputs_folder) if f.endswith(".json")]
+        if not files:
+            return {"error": "No predictions found."}
+        # Get the most recently created JSON file
+        latest_file = max(
+            (os.path.join(outputs_folder, f) for f in files),
+            key=os.path.getctime,
+        )
+        with open(latest_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data
+    except Exception as e:
+        return {"error": f"Failed to load prediction: {e}"}

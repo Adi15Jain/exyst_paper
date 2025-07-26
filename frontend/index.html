@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Exyst Predictor – Upload & Get Predicted Question Paper</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <h1>Exyst Predictor</h1>
+      <form id="upload-form">
+        <label for="pdf-file" class="file-label">Select Combined PDF:</label>
+        <input type="file" id="pdf-file" accept="application/pdf" required />
+        <button type="submit" id="upload-btn">Upload & Predict</button>
+      </form>
+      <div style="margin-top: 18px">
+        <button id="show-latest-btn" type="button">
+          Show Saved Prediction
+        </button>
+      </div>
+      <!-- Make sure your #result-section and #prediction are present as before -->
+
+      <div id="result-section" style="display: none">
+        <h2>Predicted Question Paper</h2>
+        <pre id="prediction"></pre>
+        <button id="download-btn" style="display: none">
+          Download as .txt
+        </button>
+      </div>
+      <div id="loader" style="display: none">
+        <p>Processing... Please wait ⏳</p>
+      </div>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>
