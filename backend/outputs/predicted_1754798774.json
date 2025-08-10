@@ -1,0 +1,125 @@
+{
+  "paper_info": {
+    "title": "Predicted Question Paper",
+    "academic_year": "2025-2026",
+    "subject": "Computer Science",
+    "duration": "3 Hours",
+    "max_marks": "100",
+    "date": "August 2025",
+    "instructions": [
+      "Answer all questions",
+      "All questions carry equal marks unless otherwise stated",
+      "Write clearly and legibly",
+      "Time yourself appropriately",
+      "Read all questions carefully before answering"
+    ]
+  },
+  "sections": {
+    "Section A": {
+      "title": "Short Answer Questions",
+      "description": "Answer any 5 questions (5 × 4 = 20 marks)",
+      "questions": [
+        {
+          "question_number": 3,
+          "question_text": "Answer the following (limit your answer to 50 words):**\\\\n**Marks**\\\\n a) Explain the concept of \\'fitness function\\' in the context of Genetic Algorithms.\\\\n**2**\\\\n b) Differentiate between elitism and niching in Genetic Algorithms.\\\\n**2**\\\\n c) Describe the role of \\'selection pressure\\' in shaping the evolution of a population in a Genetic Algorithm.\\\\n**2**\\\\n d) What are the key differences between binary encoding and real-valued encoding in Genetic Algorithms?\\\\n**2**\\\\n e) Briefly explain the \\'premature convergence\\' problem in Genetic Algorithms and one way to mitigate it.\\\\n**2**\\\\n **Or**\\\\n\\\\n a) What is the \\'Pareto front\\' and how is it relevant to multi-objective optimization using Genetic Algorithms?\\\\n**2**\\\\n b) Compare and contrast the \\'steady-state\\' and \\'generational\\' models of Genetic Algorithm operation.\\\\n**2**\\\\n c) Explain the concept of \\'mutation rate\\' and its influence on the exploration-exploitation trade-off in Genetic Algorithms.\\\\n**2**\\\\n d) Describe the \\'tournament selection\\' operator and its advantages over other selection methods.\\\\n**2**\\\\n e) What is \\'genetic drift\\' and how can it impact the long-term performance of a Genetic Algorithm?\\\\n**2**\\\\n\\\\n**",
+          "marks": 4,
+          "type": "short"
+        },
+        {
+          "question_number": 5,
+          "question_text": "Analyze the following statement: \\'Genetic Algorithms are a \\'black box\\' optimization technique.\\' Discuss the strengths and limitations of this perspective.\\\\n**10**\\\\n\\\\n**",
+          "marks": 4,
+          "type": "short"
+        },
+        {
+          "question_number": 7,
+          "question_text": "Using a suitable example, illustrate the process of applying Genetic Algorithms to solve a real-world optimization problem. Clearly define the problem, the fitness function, the encoding scheme, and the key steps involved in the algorithm.\\\\n**10**\\\\n\\\\n**",
+          "marks": 4,
+          "type": "short"
+        }
+      ]
+    },
+    "Section B": {
+      "title": "Medium Answer Questions",
+      "description": "Answer any 4 questions (4 × 10 = 40 marks)",
+      "questions": [
+        {
+          "question_number": 9,
+          "question_text": "Explain the concept of \\'hyperparameter tuning\\' in the context of Genetic Algorithms. Discuss the importance of choosing appropriate hyperparameters and provide strategies for effective tuning.\\\\n**10**\\\\n\\\\n**",
+          "marks": 10,
+          "type": "medium"
+        },
+        {
+          "question_number": 11,
+          "question_text": "Compare and contrast Genetic Algorithms with other evolutionary computation techniques, such as Particle Swarm Optimization (PSO) and Differential Evolution (DE). Highlight their similarities, differences, and potential applications.\\\\n**10**\\\\n\\\\n**",
+          "marks": 10,
+          "type": "medium"
+        },
+        {
+          "question_number": 13,
+          "question_text": "Discuss the ethical considerations associated with the use of Genetic Algorithms in decision-making systems. Provide examples to illustrate your points.\\\\n**10**\",\\n  \"likely_question_types_and_distribution\": [\\n    {\\n      \"type\": \"Short Answer (50 words)\",\\n      \"distribution\": \"20 marks (5 questions x 4 marks)\"\\n    },\\n    {\\n      \"type\": \"Descriptive/Analytical\",\\n      \"distribution\": \"40 marks (4 questions x 10 marks)\"\\n    }\\n  ],\\n  \"topics_most_likely_to_appear\": [\\n    \"Fitness Function\",\\n    \"Selection Pressure\",\\n    \"Encoding Schemes\",\\n    \"Mutation and Crossover\",\\n    \"Convergence and Termination Criteria\",\\n    \"Multi-Objective Optimization\",\\n    \"Hyperparameter Tuning\",\\n    \"Comparison with Other Evolutionary Algorithms\",\\n    \"Applications of Genetic Algorithms\",\\n    \"Ethical Considerations\"\\n  ],\\n  \"estimated_marks_distribution\": {\\n    \"Short Answer\": \"20 marks\",\\n    \"Descriptive/Analytical\": \"40 marks\"\\n  },\\n  \"sections_structure\": [\\n    \"Section A: Short Answer Questions (20 marks)\",\\n    \"Section B: Descriptive/Analytical Questions (40 marks)\"\\n  ],\\n  \"difficulty_level_expectations\": \"Moderate to High\",\\n  \"new_topics_that_might_be_introduced\": [\\n    \"Deep Learning with Genetic Algorithms\",\\n    \"Applications in Robotics and Control\",\\n    \"Bio-Inspired Genetic Algorithms\"\\n  ],\\n  \"pattern_analysis_and_recommendations\": \"The exam paper tends to focus on conceptual understanding and application of Genetic Algorithm principles. Students should prepare thoroughly on the core concepts, different operators, and real-world applications. Additionally, they should be able to critically analyze and compare Genetic Algorithms with other evolutionary techniques.\"\\n}\\n```\\n\\n\\n**Explanation:**\\n\\nThis predicted paper is based on the analysis of the provided historical question papers. \\n\\n* **Question Types and Distribution:**  The exam likely will have a mix of short answer and descriptive/analytical questions, similar to the past papers.\\n* **Topics:** The most prominent topics are likely to be core concepts like fitness functions, encoding, selection, crossover, mutation, convergence, and termination criteria.  \\n* **Marks Distribution:** The marks distribution is estimated based on the weightage given to different question types in the past papers.\\n* **Sections Structure:** The exam is likely to be divided into sections, with Section A focusing on shorter, conceptual questions and Section B on more in-depth analysis and application. \\n* **Difficulty Level:** The difficulty level is expected to be moderate to high, requiring a good understanding of the subject matter. \\n* **New Topics:** The predicted new topics reflect current trends in the field of Genetic Algorithms and could be areas of focus for the next exam.\\n* **Pattern Analysis and Recommendations:**  The analysis highlights the importance of conceptual understanding, application, and critical comparison in the exam.\\n\\n\\nRemember that this is a prediction based on past trends. The actual exam paper may vary.', 'exception': 'Extra data: line 41 column 1 (char 4025)', 'input_papers': 2, 'has_syllabus': True}",
+          "marks": 10,
+          "type": "medium"
+        }
+      ]
+    },
+    "Section C": {
+      "title": "Long Answer Questions",
+      "description": "Answer any 2 questions (2 × 20 = 40 marks)",
+      "questions": [
+        {
+          "question_number": 1,
+          "question_text": "{'prediction': 'Could not generate prediction', 'raw_output': '{\\n  \"predicted_question_paper\": \"**B.Tech VI (Sixth) Semester Examination**\\\\n\\\\n--- PAPER SEPARATOR ---\\\\n\\\\n**Course Code: EAI602**\\\\n**Paper ID: [New Paper ID]**\\\\n**Time: 3 Hours**\\\\n**Note: Attempt all questions.**\\\\n**Genetic Algorithms**\\\\n**Max. Marks: 60**\\\\n\\\\n**",
+          "marks": 20,
+          "type": "long"
+        },
+        {
+          "question_number": 2,
+          "question_text": "Q",
+          "marks": 20,
+          "type": "long"
+        },
+        {
+          "question_number": 4,
+          "question_text": "Q",
+          "marks": 20,
+          "type": "long"
+        },
+        {
+          "question_number": 6,
+          "question_text": "Q",
+          "marks": 20,
+          "type": "long"
+        },
+        {
+          "question_number": 8,
+          "question_text": "Q",
+          "marks": 20,
+          "type": "long"
+        },
+        {
+          "question_number": 10,
+          "question_text": "Q",
+          "marks": 20,
+          "type": "long"
+        },
+        {
+          "question_number": 12,
+          "question_text": "Q",
+          "marks": 20,
+          "type": "long"
+        }
+      ]
+    }
+  },
+  "total_questions": 13,
+  "generated_at": "2025-08-10T09:36:19.601271",
+  "ai_generated": true,
+  "raw_prediction": {
+    "prediction": "Could not generate prediction",
+    "raw_output": "{\n  \"predicted_question_paper\": \"**B.Tech VI (Sixth) Semester Examination**\\n\\n--- PAPER SEPARATOR ---\\n\\n**Course Code: EAI602**\\n**Paper ID: [New Paper ID]**\\n**Time: 3 Hours**\\n**Note: Attempt all questions.**\\n**Genetic Algorithms**\\n**Max. Marks: 60**\\n\\n**Q1. Answer the following (limit your answer to 50 words):**\\n**Marks**\\n a) Explain the concept of 'fitness function' in the context of Genetic Algorithms.\\n**2**\\n b) Differentiate between elitism and niching in Genetic Algorithms.\\n**2**\\n c) Describe the role of 'selection pressure' in shaping the evolution of a population in a Genetic Algorithm.\\n**2**\\n d) What are the key differences between binary encoding and real-valued encoding in Genetic Algorithms?\\n**2**\\n e) Briefly explain the 'premature convergence' problem in Genetic Algorithms and one way to mitigate it.\\n**2**\\n **Or**\\n\\n a) What is the 'Pareto front' and how is it relevant to multi-objective optimization using Genetic Algorithms?\\n**2**\\n b) Compare and contrast the 'steady-state' and 'generational' models of Genetic Algorithm operation.\\n**2**\\n c) Explain the concept of 'mutation rate' and its influence on the exploration-exploitation trade-off in Genetic Algorithms.\\n**2**\\n d) Describe the 'tournament selection' operator and its advantages over other selection methods.\\n**2**\\n e) What is 'genetic drift' and how can it impact the long-term performance of a Genetic Algorithm?\\n**2**\\n\\n**Q2.  Analyze the following statement: 'Genetic Algorithms are a 'black box' optimization technique.' Discuss the strengths and limitations of this perspective.\\n**10**\\n\\n**Q3.  Using a suitable example, illustrate the process of applying Genetic Algorithms to solve a real-world optimization problem. Clearly define the problem, the fitness function, the encoding scheme, and the key steps involved in the algorithm.\\n**10**\\n\\n**Q4.  Explain the concept of 'hyperparameter tuning' in the context of Genetic Algorithms. Discuss the importance of choosing appropriate hyperparameters and provide strategies for effective tuning.\\n**10**\\n\\n**Q5.  Compare and contrast Genetic Algorithms with other evolutionary computation techniques, such as Particle Swarm Optimization (PSO) and Differential Evolution (DE). Highlight their similarities, differences, and potential applications.\\n**10**\\n\\n**Q6.  Discuss the ethical considerations associated with the use of Genetic Algorithms in decision-making systems. Provide examples to illustrate your points.\\n**10**\",\n  \"likely_question_types_and_distribution\": [\n    {\n      \"type\": \"Short Answer (50 words)\",\n      \"distribution\": \"20 marks (5 questions x 4 marks)\"\n    },\n    {\n      \"type\": \"Descriptive/Analytical\",\n      \"distribution\": \"40 marks (4 questions x 10 marks)\"\n    }\n  ],\n  \"topics_most_likely_to_appear\": [\n    \"Fitness Function\",\n    \"Selection Pressure\",\n    \"Encoding Schemes\",\n    \"Mutation and Crossover\",\n    \"Convergence and Termination Criteria\",\n    \"Multi-Objective Optimization\",\n    \"Hyperparameter Tuning\",\n    \"Comparison with Other Evolutionary Algorithms\",\n    \"Applications of Genetic Algorithms\",\n    \"Ethical Considerations\"\n  ],\n  \"estimated_marks_distribution\": {\n    \"Short Answer\": \"20 marks\",\n    \"Descriptive/Analytical\": \"40 marks\"\n  },\n  \"sections_structure\": [\n    \"Section A: Short Answer Questions (20 marks)\",\n    \"Section B: Descriptive/Analytical Questions (40 marks)\"\n  ],\n  \"difficulty_level_expectations\": \"Moderate to High\",\n  \"new_topics_that_might_be_introduced\": [\n    \"Deep Learning with Genetic Algorithms\",\n    \"Applications in Robotics and Control\",\n    \"Bio-Inspired Genetic Algorithms\"\n  ],\n  \"pattern_analysis_and_recommendations\": \"The exam paper tends to focus on conceptual understanding and application of Genetic Algorithm principles. Students should prepare thoroughly on the core concepts, different operators, and real-world applications. Additionally, they should be able to critically analyze and compare Genetic Algorithms with other evolutionary techniques.\"\n}\n```\n\n\n**Explanation:**\n\nThis predicted paper is based on the analysis of the provided historical question papers. \n\n* **Question Types and Distribution:**  The exam likely will have a mix of short answer and descriptive/analytical questions, similar to the past papers.\n* **Topics:** The most prominent topics are likely to be core concepts like fitness functions, encoding, selection, crossover, mutation, convergence, and termination criteria.  \n* **Marks Distribution:** The marks distribution is estimated based on the weightage given to different question types in the past papers.\n* **Sections Structure:** The exam is likely to be divided into sections, with Section A focusing on shorter, conceptual questions and Section B on more in-depth analysis and application. \n* **Difficulty Level:** The difficulty level is expected to be moderate to high, requiring a good understanding of the subject matter. \n* **New Topics:** The predicted new topics reflect current trends in the field of Genetic Algorithms and could be areas of focus for the next exam.\n* **Pattern Analysis and Recommendations:**  The analysis highlights the importance of conceptual understanding, application, and critical comparison in the exam.\n\n\nRemember that this is a prediction based on past trends. The actual exam paper may vary.",
+    "exception": "Extra data: line 41 column 1 (char 4025)",
+    "input_papers": 2,
+    "has_syllabus": true
+  }
+}

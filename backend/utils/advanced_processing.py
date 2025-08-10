@@ -1,38 +1,11 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-import os
-import time
-import json
 import re
-from datetime import datetime
 from typing import List, Dict
-import uvicorn
+from datetime import datetime
 
-from agents.classifier import split_pdf_by_classification
-from agents.syllabus_analyzer import extract_syllabus_with_llm
-from agents.ques_paper_analyzer import predict_next_paper_structure
-
-app = FastAPI(title="Exyst Predictor")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # For development only, restrict for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-UPLOAD_DIR = "uploads"
-OUTPUTS_DIR = "outputs"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(OUTPUTS_DIR, exist_ok=True)
-
-# ===== ADVANCED TEXT CLEANING CLASS =====
 class AdvancedTextCleaner:
     def __init__(self):
         self.cleaning_patterns = [
-            # Remove JSON artifacts and error messages
+            # Remove JSON artifacts
             (r"'prediction':\s*'[^']*'", ""),
             (r"'raw_output':\s*'[^']*'", ""),
             (r"'exception':\s*'[^']*'", ""),
@@ -51,14 +24,6 @@ class AdvancedTextCleaner:
             (r'Section [A-C]:.*?(?=Q\d+|\n)', ''),
             (r'Answer any \d+ questions.*?(?=Q\d+|\n)', ''),
             (r'marks?\s*distribution.*?(?=Q\d+|\n)', '', re.IGNORECASE),
-            
-            # Remove paper separators and metadata
-            (r'--- PAPER SEPARATOR ---', ''),
-            (r'B\.Tech.*?Examination', ''),
-            (r'Course Code:.*?(?=\n|\s)', ''),
-            (r'Paper ID:.*?(?=\n|\s)', ''),
-            (r'Max\. Marks:.*?(?=\n|\s)', ''),
-            (r'Time:.*?(?=\n|\s)', ''),
             
             # Clean question markers
             (r'Q\.?\s*(\d+)', r'Q\1.'),
@@ -202,7 +167,6 @@ class AdvancedTextCleaner:
         
         return content.strip()
 
-# ===== QUESTION PAPER VALIDATOR CLASS =====
 class QuestionPaperValidator:
     def __init__(self):
         self.min_questions = 3
@@ -294,7 +258,6 @@ class QuestionPaperValidator:
         meaningful_count = sum(1 for q in questions if len(str(q.get("content", ""))) > 10)
         return meaningful_count / len(questions) >= 0.7
 
-# ===== PROFESSIONAL FORMATTER CLASS =====
 class ProfessionalQuestionPaperFormatter:
     def __init__(self):
         pass
@@ -387,288 +350,3 @@ class ProfessionalQuestionPaperFormatter:
         """Generate a paper ID matching the original format"""
         year = datetime.now().year
         return f"096{year % 100}{datetime.now().month:02d}26"
-
-# ===== YOUR EXISTING FUNCTIONS (ENHANCED) =====
-def parse_questions(raw_text):
-    """Parse the raw prediction text into individual questions"""
-    # Use the advanced cleaner
-    cleaner = AdvancedTextCleaner()
-    return cleaner.extract_questions_with_structure(raw_text)
-
-def determine_marks(question_text):
-    """Determine marks based on question complexity"""
-    word_count = len(question_text.split())
-    if word_count < 20:
-        return 4
-    elif word_count < 50:
-        return 10
-    else:
-        return 20
-
-def determine_question_type(question_text):
-    """Determine if it's short/medium/long answer"""
-    question_lower = question_text.lower()
-    if any(word in question_lower for word in ['define', 'list', 'name', 'state', 'what is', 'who is']):
-        return "short"
-    elif any(word in question_lower for word in ['explain', 'describe', 'compare', 'analyze', 'discuss']):
-        return "medium"
-    else:
-        return "long"
-
-def extract_subject_from_syllabus(syllabus_text):
-    """Extract subject name from syllabus text"""
-    subject_keywords = ['computer science', 'mathematics', 'physics', 'chemistry', 'biology', 'english']
-    syllabus_lower = syllabus_text.lower()
-    
-    for subject in subject_keywords:
-        if subject in syllabus_lower:
-            return subject.title()
-    
-    return "Computer Science"
-
-def extract_paper_metadata_from_pdf(pdf_path: str) -> Dict:
-    """Extract metadata from the uploaded PDF"""
-    try:
-        classified = split_pdf_by_classification(pdf_path)
-        question_papers = classified.get("question_papers", "")
-        
-        return {
-            "university": extract_university_name(question_papers),
-            "course_code": extract_course_code(question_papers),
-            "subject": extract_subject_name(question_papers),
-            "max_marks": extract_max_marks(question_papers),
-        }
-    except Exception as e:
-        return get_default_metadata()
-
-def extract_university_name(text: str) -> str:
-    """Extract university name from question paper text"""
-    university_patterns = [
-        r'([A-Z\s]+UNIVERSITY[A-Z\s]*)',
-        r'TEERTHANKER MAHAVEER UNIVERSITY',
-    ]
-    
-    for pattern in university_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-    
-    return "TEERTHANKER MAHAVEER UNIVERSITY – MORADABAD"
-
-def extract_course_code(text: str) -> str:
-    """Extract course code"""
-    course_patterns = [
-        r'Course Code:\s*([A-Z]+\d+)',
-        r'\b([A-Z]{2,}\d{3,})\b'
-    ]
-    
-    for pattern in course_patterns:
-        match = re.search(pattern, text)
-        if match:
-            return match.group(1)
-    
-    return "EAI602"
-
-def extract_subject_name(text: str) -> str:
-    """Extract subject name"""
-    subject_keywords = {
-        'genetic': 'Genetic Algorithms',
-        'neural': 'Neural Networks',
-        'machine learning': 'Machine Learning',
-        'artificial intelligence': 'Artificial Intelligence'
-    }
-    
-    text_lower = text.lower()
-    for keyword, subject in subject_keywords.items():
-        if keyword in text_lower:
-            return subject
-    
-    return "Genetic Algorithms"
-
-def extract_max_marks(text: str) -> str:
-    """Extract maximum marks"""
-    marks_patterns = [
-        r'Max\.?\s*Marks?:\s*(\d+)',
-        r'Maximum Marks?:\s*(\d+)',
-        r'Total Marks?:\s*(\d+)'
-    ]
-    
-    for pattern in marks_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return match.group(1)
-    
-    return "60"
-
-def get_default_metadata() -> Dict:
-    """Default metadata when extraction fails"""
-    return {
-        "university": "TEERTHANKER MAHAVEER UNIVERSITY – MORADABAD",
-        "course_code": "EAI602",
-        "subject": "Genetic Algorithms",
-        "max_marks": "60",
-    }
-
-def create_error_fallback(prediction, error_message: str) -> Dict:
-    """Create error fallback response"""
-    return {
-        "header": {
-            "university": "TEERTHANKER MAHAVEER UNIVERSITY – MORADABAD",
-            "exam_title": f"B.Tech VI (Sixth) Semester Examination {datetime.now().year}-{datetime.now().year + 1}",
-            "course_code": "EAI602",
-            "paper_id": f"096{datetime.now().year % 100}{datetime.now().month:02d}26",
-            "subject": "Question Paper Generation Error",
-            "time": "3 Hours",
-            "max_marks": "60",
-            "note": "Error occurred during generation."
-        },
-        "questions": [
-            {
-                "number": 1,
-                "main_question": f"Error in question generation: {error_message}",
-                "parts": [],
-                "total_marks": 0,
-                "type": "error",
-                "has_parts": False
-            }
-        ],
-        "total_questions": 1,
-        "generated_at": datetime.now().isoformat(),
-        "ai_generated": False,
-        "formatting_success": False,
-        "error_message": error_message
-    }
-
-# ===== UPDATED MAIN ENDPOINT =====
-@app.post("/predict-question-paper/", response_class=JSONResponse)
-async def predict_question_paper(file: UploadFile = File(...)):
-    # 1. Save uploaded PDF
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
-    
-    timestamp = int(time.time())
-    safe_name = file.filename.replace(" ", "_")
-    pdf_path = os.path.join(UPLOAD_DIR, f"{timestamp}_{safe_name}")
-    with open(pdf_path, "wb") as f:
-        f.write(await file.read())
-    
-    # 2. Extract metadata from original PDF
-    try:
-        pdf_metadata = extract_paper_metadata_from_pdf(pdf_path)
-        print(f"Extracted metadata: {pdf_metadata}")
-    except Exception as e:
-        print(f"Metadata extraction failed: {e}")
-        pdf_metadata = get_default_metadata()
-    
-    # 3. Split into syllabus and question paper text
-    try:
-        classified = split_pdf_by_classification(pdf_path)
-        syllabus_text = classified["syllabus"]
-        question_paper_text = classified["question_papers"]
-        print(f"PDF classification successful. Syllabus length: {len(syllabus_text)}, Papers length: {len(question_paper_text)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"PDF classification failed: {str(e)}")
-    
-    # 4. Split question papers
-    papers = re.split(r"(20\d{2}-\d{2}|20\d{2}|May \d{4})", question_paper_text)
-    merged_papers = []
-    i = 0
-    while i < len(papers) - 1:
-        year = papers[i + 1].strip()
-        content = papers[i + 2].strip() if i + 2 < len(papers) else ''
-        merged_papers.append(f"{year}\n{content}")
-        i += 2
-    if not merged_papers:
-        merged_papers = [question_paper_text]
-    
-    print(f"Found {len(merged_papers)} paper sections")
-    
-    # 5. Run syllabus analyzer
-    try:
-        syllabus_struct = extract_syllabus_with_llm(syllabus_text)
-        print("Syllabus analysis completed")
-    except Exception as e:
-        print(f"Syllabus analysis failed: {e}")
-        syllabus_struct = None
-    
-    # 6. Predict next year's question paper
-    try:
-        prediction = predict_next_paper_structure(
-            merged_papers,
-            syllabus_text=syllabus_text
-        )
-        print(f"Prediction generated: {type(prediction)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
-
-    # 7. ADVANCED PROCESSING PIPELINE
-    try:
-        print("Starting advanced processing pipeline...")
-        
-        # Step 7a: Advanced text cleaning
-        cleaner = AdvancedTextCleaner()
-        structured_questions = cleaner.extract_questions_with_structure(str(prediction))
-        print(f"Extracted {len(structured_questions)} structured questions")
-        
-        # Step 7b: Validation and improvement
-        validator = QuestionPaperValidator()
-        improved_questions = validator.validate_and_improve(structured_questions)
-        print(f"Validated and improved to {len(improved_questions)} questions")
-        
-        # Step 7c: Professional formatting
-        formatter = ProfessionalQuestionPaperFormatter()
-        final_paper = formatter.format_question_paper(improved_questions, pdf_metadata)
-        print("Professional formatting completed successfully")
-        
-        # Add success indicators
-        final_paper["parsing_success"] = True
-        final_paper["processing_method"] = "advanced_pipeline"
-        
-    except Exception as e:
-        print(f"Advanced processing failed: {e}")
-        # Fallback to error response
-        final_paper = create_error_fallback(prediction, str(e))
-
-    # 8. Save formatted paper
-    json_filename = f"predicted_{timestamp}.json"
-    json_path = os.path.join(OUTPUTS_DIR, json_filename)
-    try:
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(final_paper, f, indent=2, ensure_ascii=False)
-        print(f"Professional question paper saved to {json_path}")
-    except Exception as e:
-        print(f"Error saving prediction JSON: {e}")
-    
-    return JSONResponse(content=final_paper)
-
-# ===== YOUR EXISTING ENDPOINTS =====
-@app.get("/latest-prediction/", response_class=JSONResponse)
-def get_latest_prediction():
-    outputs_folder = "outputs"
-    try:
-        files = [f for f in os.listdir(outputs_folder) if f.endswith(".json")]
-        if not files:
-            return {"error": "No predictions found."}
-        latest_file = max(
-            (os.path.join(outputs_folder, f) for f in files),
-            key=os.path.getctime,
-        )
-        with open(latest_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data
-    except Exception as e:
-        return {"error": f"Failed to load prediction: {e}"}
-
-@app.get("/latest-prediction-raw/", response_class=JSONResponse)
-def get_latest_prediction_raw():
-    """Get the raw prediction without formatting (for debugging purposes)"""
-    try:
-        data = get_latest_prediction()
-        if "error" in data:
-            return data
-        return {"raw_prediction": data.get("raw_prediction", data)}
-    except Exception as e:
-        return {"error": f"Failed to load raw prediction: {e}"}
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
