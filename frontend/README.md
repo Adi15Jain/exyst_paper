@@ -1,40 +1,158 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/pages/api-reference/create-next-app).
+# Exyst Frontend
+
+> Next.js 15 dashboard for the Exyst AI-Powered Exam Intelligence Platform.
+
+## Tech Stack
+
+- **Framework**: Next.js 15 (Pages Router)
+- **Language**: TypeScript
+- **Styling**: TailwindCSS v4 + custom CSS design system
+- **State**: React Context (Auth)
+- **HTTP**: Custom typed API client with JWT auto-refresh
+
+## Pages
+
+| Route             | Description                                       |
+| ----------------- | ------------------------------------------------- |
+| `/`               | Landing page — hero section, features, CTA        |
+| `/login`          | Login / Register — glassmorphism card, validation |
+| `/dashboard`      | Overview — stat cards, quick actions, recent docs |
+| `/upload`         | Upload — drag & drop, pipeline progress stages    |
+| `/documents`      | Document list — paginated, status badges          |
+| `/documents/[id]` | Document detail — predicted paper, analysis tabs  |
+| `/analytics`      | Analytics — aggregate stats, confidence breakdown |
+
+## Project Structure
+
+```
+frontend/
+├── pages/                      # Route pages
+│   ├── _app.tsx                # App wrapper (AuthProvider, fonts)
+│   ├── _document.tsx           # HTML document
+│   ├── index.tsx               # Landing page
+│   ├── login.tsx               # Auth page
+│   ├── dashboard.tsx           # Dashboard
+│   ├── upload.tsx              # Upload + pipeline flow
+│   ├── analytics.tsx           # Aggregate analytics
+│   └── documents/
+│       ├── index.tsx           # Document list
+│       └── [id].tsx            # Document detail (tabs)
+│
+├── components/
+│   ├── layout/
+│   │   ├── AppLayout.tsx       # Sidebar + top bar (auth pages)
+│   │   └── MainCard.tsx        # Content card wrapper
+│   └── ui/                     # Shared UI components
+│       ├── AnimatedBackground.tsx
+│       ├── FileUpload.tsx
+│       ├── Header.tsx
+│       ├── Footer.tsx
+│       ├── ErrorMessage.tsx
+│       ├── SubmitButton.tsx
+│       └── QuestionPaper.tsx
+│
+├── lib/
+│   ├── api.ts                  # Typed API client
+│   │                           #   - JWT token management
+│   │                           #   - Automatic 401 → refresh
+│   │                           #   - Typed interfaces for all endpoints
+│   └── auth-context.tsx        # React Context for auth state
+│
+├── types/
+│   └── prediction.ts           # Shared TypeScript interfaces
+│
+├── styles/
+│   └── globals.css             # Design system
+│                               #   - CSS variables (colors, gradients)
+│                               #   - Glassmorphism utilities
+│                               #   - Animation keyframes
+│                               #   - Component styles (buttons, badges, cards)
+│
+├── package.json
+├── tsconfig.json
+├── next.config.ts
+├── postcss.config.mjs
+└── Dockerfile
+```
+
+## Design System
+
+The design system in `styles/globals.css` provides:
+
+- **CSS Variables** — dark mode palette, accent colors, gradients, borders, shadows
+- **Glassmorphism** — `.glass`, `.glass-card` (backdrop-blur + subtle borders)
+- **Gradient Text** — `.text-gradient`, `.text-gradient-accent`
+- **Buttons** — `.btn-primary` (gradient), `.btn-secondary` (outline)
+- **Badges** — `.badge-success`, `.badge-warning`, `.badge-error`, `.badge-info`
+- **Stat Cards** — `.stat-card`, `.stat-value`, `.stat-label`
+- **Inputs** — `.input-field` with focus glow
+- **Animations** — `animate-fade-in`, `animate-scale-in`, `animate-float`, `animate-pulse-glow`
+- **Stagger** — `.stagger-1` through `.stagger-5` for cascade effects
+- **Charts** — `.bar-chart-bar`, `.confidence-ring` for data visualization
+
+## API Client (`lib/api.ts`)
+
+Centralized HTTP client that handles:
+
+- **Token Management** — stores JWT access + refresh tokens in localStorage
+- **Auto-Refresh** — on 401, transparently refreshes and retries the request
+- **Typed Responses** — all endpoints return typed TypeScript interfaces
+- **FormData** — handles file uploads with correct Content-Type
+
+```typescript
+import { auth, documents, analysis, predictions, analytics } from "@/lib/api";
+
+// Auth
+await auth.login("user@example.com", "password");
+const user = await auth.me();
+
+// Upload & analyze
+const doc = await documents.upload(file);
+await analysis.run(doc.id);
+const prediction = await predictions.generate(doc.id);
+
+// Analytics
+const stats = await analytics.overview();
+const topics = await analytics.topicFrequency(doc.id);
+```
 
 ## Getting Started
 
-First, run the development server:
+### With the full stack (recommended)
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# From the project root
+docker compose up --build
+# Frontend at http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Standalone development
 
-You can start editing the page by modifying `pages/index.tsx`. The page auto-updates as you edit the file.
+```bash
+# Install dependencies
+npm install
 
-[API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) can be accessed on [http://localhost:3000/api/hello](http://localhost:3000/api/hello). This endpoint can be edited in `pages/api/hello.ts`.
+# Run dev server
+npm run dev
 
-The `pages/api` directory is mapped to `/api/*`. Files in this directory are treated as [API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) instead of React pages.
+# Build for production
+npm run build
 
-This project uses [`next/font`](https://nextjs.org/docs/pages/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+# Lint
+npm run lint
+```
 
-## Learn More
+### Environment Variables
 
-To learn more about Next.js, take a look at the following resources:
+| Variable              | Default                 | Description          |
+| --------------------- | ----------------------- | -------------------- |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Backend API base URL |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn-pages-router) - an interactive Next.js tutorial.
+## Dependencies
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/pages/building-your-application/deploying) for more details.
+| Package       | Version | Purpose         |
+| ------------- | ------- | --------------- |
+| `next`        | 15.4    | React framework |
+| `react`       | 19.1    | UI library      |
+| `typescript`  | ^5      | Type safety     |
+| `tailwindcss` | ^4      | Utility CSS     |

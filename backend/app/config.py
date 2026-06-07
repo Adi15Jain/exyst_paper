@@ -1,0 +1,71 @@
+"""
+Application configuration using Pydantic Settings.
+
+All configuration is loaded from environment variables (or .env file).
+This ensures no secrets are hardcoded and configuration is validated at startup.
+"""
+
+from functools import lru_cache
+from typing import List
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """
+    Central configuration for the Exyst backend.
+    Values are loaded from environment variables or .env file.
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # --- App ---
+    APP_NAME: str = "Exyst"
+    APP_VERSION: str = "2.0.0"
+    DEBUG: bool = False
+    CORS_ORIGINS: List[str] = ["http://localhost:3000"]
+
+    # --- LLM Providers ---
+    GROQ_API_KEY: str = ""
+    HF_TOKEN: str = ""
+    DEFAULT_LLM_MODEL: str = "groq/gemma2-9b-it"
+
+    # --- Database ---
+    DATABASE_URL: str = "postgresql+asyncpg://exyst:exyst_password@localhost:5432/exyst_db"
+
+    # --- JWT Auth ---
+    JWT_SECRET_KEY: str = "change-this-to-a-random-64-char-hex-string"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    # --- Redis ---
+    REDIS_URL: str = "redis://localhost:6379/0"
+
+    # --- File Storage ---
+    UPLOAD_DIR: str = "uploads"
+    OUTPUTS_DIR: str = "outputs"
+    MAX_UPLOAD_SIZE_MB: int = 50
+
+    @property
+    def max_upload_size_bytes(self) -> int:
+        return self.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+
+    @property
+    def database_url_sync(self) -> str:
+        """Sync database URL for Alembic migrations."""
+        return self.DATABASE_URL.replace("+asyncpg", "+psycopg2")
+
+
+@lru_cache()
+def get_settings() -> Settings:
+    """
+    Cached settings instance.
+    Call this instead of creating Settings() directly.
+    """
+    return Settings()

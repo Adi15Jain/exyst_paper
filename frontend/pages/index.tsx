@@ -1,357 +1,377 @@
-"use client";
-import React, { useState } from "react";
-import AnimatedBackground from "@/ui/AnimatedBackground";
-import Header from "@/ui/Header";
-import MainCard from "@/layout/MainCard";
-import FileUpload from "@/ui/FileUpload";
-import ErrorMessage from "@/ui/ErrorMessage";
-import SubmitButton from "@/ui/SubmitButton";
-import QuestionPaper from "@/ui/QuestionPaper";
-import Footer from "@/ui/Footer";
-import {
-    QuestionPaperData,
-    Section,
-    Question,
-    ApiError,
-} from "@/types/prediction";
+/**
+ * Landing page — hero section with animated design.
+ * Redirects to dashboard if already authenticated.
+ */
 
-const Home: React.FC = () => {
-    const [file, setFile] = useState<File | null>(null);
-    const [questionPaper, setQuestionPaper] =
-        useState<QuestionPaperData | null>(null);
-    const [loading, setLoading] = useState<boolean>(false);
-    const [dragActive, setDragActive] = useState<boolean>(false);
-    const [error, setError] = useState<string | null>(null);
+import React, { useEffect } from "react";
+import Head from "next/head";
+import { useRouter } from "next/router";
+import { useAuth } from "@/lib/auth-context";
 
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
-        if (e.target.files) {
-            setFile(e.target.files[0]);
-            setError(null);
+export default function LandingPage() {
+    const router = useRouter();
+    const { user, loading } = useAuth();
+
+    useEffect(() => {
+        if (!loading && user) {
+            router.push("/dashboard");
         }
-    };
-
-    const handleDrag = (e: React.DragEvent<HTMLDivElement>): void => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.type === "dragenter" || e.type === "dragover") {
-            setDragActive(true);
-        } else if (e.type === "dragleave") {
-            setDragActive(false);
-        }
-    };
-
-    const handleDrop = (e: React.DragEvent<HTMLDivElement>): void => {
-        e.preventDefault();
-        e.stopPropagation();
-        setDragActive(false);
-        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-            setFile(e.dataTransfer.files[0]);
-            setError(null);
-        }
-    };
-
-    const handleSubmit = async (
-        e: React.FormEvent<HTMLFormElement>
-    ): Promise<void> => {
-        e.preventDefault();
-        if (!file) return;
-
-        setLoading(true);
-        setQuestionPaper(null);
-        setError(null);
-
-        const formData = new FormData();
-        formData.append("file", file);
-
-        try {
-            // Single API call since backend now returns formatted data directly
-            const response = await fetch(
-                "http://localhost:8000/predict-question-paper/",
-                {
-                    method: "POST",
-                    body: formData,
-                }
-            );
-
-            if (!response.ok) {
-                throw new Error(`Upload failed: ${response.status}`);
-            }
-
-            const paperData: QuestionPaperData | ApiError =
-                await response.json();
-
-            if ("error" in paperData) {
-                throw new Error(paperData.error);
-            }
-
-            // Check if parsing was successful
-            if (!paperData.parsing_success) {
-                console.warn(
-                    "Question paper parsing had issues:",
-                    paperData.error_message
-                );
-            }
-
-            setQuestionPaper(paperData);
-        } catch (error) {
-            console.error("Error:", error);
-            setError(
-                error instanceof Error
-                    ? error.message
-                    : "An unexpected error occurred"
-            );
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleDownloadPDF = (): void => {
-        if (!questionPaper) return;
-
-        // Create printable version with enhanced styling
-        const printWindow = window.open("", "_blank");
-        if (printWindow) {
-            const { paper_info, sections } = questionPaper;
-
-            printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>${paper_info.title}</title>
-            <meta charset="utf-8">
-            <style>
-              @page { 
-                margin: 2cm; 
-                size: A4;
-              }
-              * {
-                box-sizing: border-box;
-              }
-              body { 
-                font-family: 'Times New Roman', serif; 
-                margin: 0;
-                padding: 0;
-                line-height: 1.6;
-                color: #000;
-                background: #fff;
-              }
-              .header { 
-                text-align: center; 
-                border-bottom: 3px solid #000; 
-                padding-bottom: 1cm; 
-                margin-bottom: 1cm;
-              }
-              .header h1 {
-                font-size: 24px;
-                margin: 0 0 0.5cm 0;
-                font-weight: bold;
-              }
-              .header h2 {
-                font-size: 20px;
-                margin: 0 0 0.5cm 0;
-                font-weight: normal;
-              }
-              .paper-info {
-                display: flex;
-                justify-content: space-between;
-                margin: 0.5cm 0;
-                font-size: 14px;
-              }
-              .paper-info span {
-                font-weight: bold;
-              }
-              .instructions {
-                margin: 1cm 0;
-                page-break-inside: avoid;
-              }
-              .instructions h3 {
-                font-size: 16px;
-                margin: 0 0 0.5cm 0;
-                font-weight: bold;
-              }
-              .instructions ol {
-                margin: 0;
-                padding-left: 1.5cm;
-              }
-              .instructions li {
-                margin-bottom: 0.2cm;
-              }
-              .section { 
-                margin: 1.5cm 0; 
-                page-break-inside: avoid;
-              }
-              .section-header {
-                background: #f8f8f8;
-                padding: 0.5cm;
-                font-weight: bold;
-                margin-bottom: 0.5cm;
-                border: 1px solid #ddd;
-                font-size: 16px;
-              }
-              .section-description {
-                font-size: 12px;
-                font-weight: normal;
-                margin-top: 0.2cm;
-                color: #666;
-              }
-              .question { 
-                margin: 0.8cm 0; 
-                padding: 0.3cm 0 0.3cm 0.5cm; 
-                border-left: 3px solid #333;
-                page-break-inside: avoid;
-                position: relative;
-                min-height: 1.5cm;
-              }
-              .question-content {
-                display: flex;
-                justify-content: space-between;
-                align-items: flex-start;
-              }
-              .question-text {
-                flex: 1;
-                padding-right: 1cm;
-              }
-              .marks {
-                font-weight: bold;
-                font-size: 12px;
-                background: #f0f0f0;
-                padding: 0.1cm 0.3cm;
-                border: 1px solid #ccc;
-                border-radius: 3px;
-                white-space: nowrap;
-              }
-              .footer {
-                text-align: center;
-                margin-top: 2cm;
-                font-size: 10px;
-                color: #666;
-                border-top: 1px solid #ddd;
-                padding-top: 0.5cm;
-              }
-              @media print {
-                body { font-size: 12pt; }
-                .section { page-break-inside: avoid; }
-                .question { page-break-inside: avoid; }
-              }
-            </style>
-          </head>
-          <body>
-            <div class="header">
-              <h1>${paper_info.title}</h1>
-              <h2>${paper_info.subject}</h2>
-              <div class="paper-info">
-                <span>Academic Year: ${paper_info.academic_year}</span>
-                <span>Duration: ${paper_info.duration}</span>
-                <span>Max Marks: ${paper_info.max_marks}</span>
-              </div>
-              <p><strong>Date: ${paper_info.date}</strong></p>
-            </div>
-            
-            <div class="instructions">
-              <h3>Instructions:</h3>
-              <ol>
-                ${paper_info.instructions
-                    .map((instruction) => `<li>${instruction}</li>`)
-                    .join("")}
-              </ol>
-            </div>
-            
-            ${Object.entries(sections)
-                .map(
-                    ([sectionKey, section]: [string, Section]) => `
-              <div class="section">
-                <div class="section-header">
-                  ${sectionKey}: ${section.title}
-                  <div class="section-description">${section.description}</div>
-                </div>
-                ${section.questions
-                    .map(
-                        (question: Question) => `
-                  <div class="question">
-                    <div class="question-content">
-                      <div class="question-text">
-                        <strong>${question.question_number}.</strong> ${question.question_text}
-                      </div>
-                      <div class="marks">[${question.marks} marks]</div>
-                    </div>
-                  </div>
-                `
-                    )
-                    .join("")}
-              </div>
-            `
-                )
-                .join("")}
-            
-            <div class="footer">
-              <p>Generated by EXYST AI • ${new Date().toLocaleDateString()}</p>
-              <p>This is an AI-generated question paper for practice purposes</p>
-            </div>
-          </body>
-        </html>
-      `);
-
-            printWindow.document.close();
-
-            // Wait for content to load before printing
-            setTimeout(() => {
-                printWindow.focus();
-                printWindow.print();
-            }, 500);
-        }
-    };
-
-    const handleDownloadJSON = (): void => {
-        if (!questionPaper) return;
-
-        const dataStr = JSON.stringify(questionPaper, null, 2);
-        const dataBlob = new Blob([dataStr], { type: "application/json" });
-        const url = URL.createObjectURL(dataBlob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `exyst_question_paper_${new Date().getTime()}.json`;
-        link.click();
-        URL.revokeObjectURL(url);
-    };
+    }, [user, loading, router]);
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative">
-            <AnimatedBackground />
+        <>
+            <Head>
+                <title>Exyst — AI-Powered Exam Intelligence Platform</title>
+                <meta
+                    name="description"
+                    content="Analyze university syllabi and historical question papers to predict future exam questions with AI-powered confidence scoring."
+                />
+            </Head>
 
-            <div className="relative z-10 flex flex-col items-center justify-center min-h-screen px-4 py-8">
-                <Header />
+            <div
+                style={{
+                    minHeight: "100vh",
+                    background: "var(--bg-primary)",
+                    position: "relative",
+                    overflow: "hidden",
+                }}
+            >
+                {/* Animated Background Orbs */}
+                <div
+                    className="animate-float"
+                    style={{
+                        position: "absolute",
+                        width: 600,
+                        height: 600,
+                        borderRadius: "50%",
+                        background:
+                            "radial-gradient(circle, rgba(99,102,241,0.12) 0%, transparent 70%)",
+                        top: "-15%",
+                        right: "-10%",
+                        filter: "blur(40px)",
+                    }}
+                />
+                <div
+                    className="animate-float"
+                    style={{
+                        position: "absolute",
+                        width: 500,
+                        height: 500,
+                        borderRadius: "50%",
+                        background:
+                            "radial-gradient(circle, rgba(139,92,246,0.1) 0%, transparent 70%)",
+                        bottom: "-10%",
+                        left: "-5%",
+                        filter: "blur(40px)",
+                        animationDelay: "2s",
+                    }}
+                />
+                <div
+                    style={{
+                        position: "absolute",
+                        width: 300,
+                        height: 300,
+                        borderRadius: "50%",
+                        background:
+                            "radial-gradient(circle, rgba(34,211,238,0.08) 0%, transparent 70%)",
+                        top: "40%",
+                        left: "30%",
+                        filter: "blur(60px)",
+                    }}
+                />
 
-                <MainCard>
-                    <form onSubmit={handleSubmit} className="space-y-8">
-                        <FileUpload
-                            file={file}
-                            dragActive={dragActive}
-                            onFileChange={handleFileChange}
-                            onDrag={handleDrag}
-                            onDrop={handleDrop}
+                {/* Nav */}
+                <nav
+                    className="glass"
+                    style={{
+                        position: "fixed",
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        zIndex: 50,
+                        padding: "16px 32px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                    }}
+                >
+                    <h1
+                        className="text-gradient"
+                        style={{
+                            fontSize: "1.3rem",
+                            fontWeight: 900,
+                            margin: 0,
+                            letterSpacing: "-0.02em",
+                        }}
+                    >
+                        EXYST
+                    </h1>
+                    <div style={{ display: "flex", gap: 12 }}>
+                        <button
+                            className="btn-secondary"
+                            onClick={() => router.push("/login")}
+                            style={{ padding: "8px 20px", fontSize: "0.8rem" }}
+                        >
+                            Sign In
+                        </button>
+                        <button
+                            className="btn-primary"
+                            onClick={() => router.push("/login")}
+                            style={{ padding: "8px 20px", fontSize: "0.8rem" }}
+                        >
+                            Get Started
+                        </button>
+                    </div>
+                </nav>
+
+                {/* Hero Content */}
+                <div
+                    style={{
+                        position: "relative",
+                        zIndex: 10,
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        minHeight: "100vh",
+                        textAlign: "center",
+                        padding: "0 24px",
+                    }}
+                >
+                    <div className="animate-fade-in" style={{ maxWidth: 720 }}>
+                        {/* Badge */}
+                        <div
+                            className="badge badge-info animate-scale-in"
+                            style={{
+                                marginBottom: 24,
+                                fontSize: "0.75rem",
+                                padding: "6px 16px",
+                            }}
+                        >
+                            ✨ AI-Powered Exam Intelligence
+                        </div>
+
+                        {/* Title */}
+                        <h1
+                            style={{
+                                fontSize: "clamp(2.5rem, 5vw, 4rem)",
+                                fontWeight: 900,
+                                lineHeight: 1.1,
+                                margin: "0 0 20px",
+                                letterSpacing: "-0.03em",
+                            }}
+                        >
+                            Predict Your Next{" "}
+                            <span className="text-gradient">
+                                Exam Questions
+                            </span>{" "}
+                            With AI
+                        </h1>
+
+                        {/* Subtitle */}
+                        <p
+                            className="animate-fade-in stagger-2"
+                            style={{
+                                fontSize: "1.1rem",
+                                color: "var(--text-secondary)",
+                                lineHeight: 1.6,
+                                margin: "0 0 36px",
+                                maxWidth: 560,
+                                marginLeft: "auto",
+                                marginRight: "auto",
+                                opacity: 0,
+                            }}
+                        >
+                            Upload your syllabus and past question papers. Our
+                            AI analyzes topic frequency, detects trends, and
+                            generates predicted papers with confidence scoring.
+                        </p>
+
+                        {/* CTA Buttons */}
+                        <div
+                            className="animate-fade-in stagger-3"
+                            style={{
+                                display: "flex",
+                                gap: 16,
+                                justifyContent: "center",
+                                opacity: 0,
+                            }}
+                        >
+                            <button
+                                className="btn-primary"
+                                onClick={() => router.push("/login")}
+                                style={{
+                                    padding: "14px 32px",
+                                    fontSize: "0.95rem",
+                                }}
+                            >
+                                🚀 Get Started — Free
+                            </button>
+                            <button
+                                className="btn-secondary"
+                                onClick={() => {
+                                    const el =
+                                        document.getElementById("features");
+                                    el?.scrollIntoView({ behavior: "smooth" });
+                                }}
+                                style={{
+                                    padding: "14px 32px",
+                                    fontSize: "0.95rem",
+                                }}
+                            >
+                                Learn More ↓
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Features Section */}
+                <div
+                    id="features"
+                    style={{
+                        position: "relative",
+                        zIndex: 10,
+                        padding: "80px 24px 100px",
+                        maxWidth: 1000,
+                        margin: "0 auto",
+                    }}
+                >
+                    <h2
+                        style={{
+                            textAlign: "center",
+                            fontSize: "2rem",
+                            fontWeight: 800,
+                            marginBottom: 12,
+                            letterSpacing: "-0.02em",
+                        }}
+                    >
+                        How It Works
+                    </h2>
+                    <p
+                        style={{
+                            textAlign: "center",
+                            color: "var(--text-muted)",
+                            fontSize: "0.95rem",
+                            marginBottom: 48,
+                        }}
+                    >
+                        Three steps to smarter exam preparation
+                    </p>
+
+                    <div
+                        style={{
+                            display: "grid",
+                            gridTemplateColumns:
+                                "repeat(auto-fit, minmax(280px, 1fr))",
+                            gap: 24,
+                        }}
+                    >
+                        <FeatureCard
+                            icon="📤"
+                            title="1. Upload"
+                            description="Drop your combined PDF — syllabus and past question papers. Our AI automatically classifies each page."
                         />
-
-                        <ErrorMessage error={error} />
-
-                        <SubmitButton
-                            loading={loading}
-                            disabled={loading || !file}
+                        <FeatureCard
+                            icon="🧠"
+                            title="2. Analyze"
+                            description="LLM-powered analysis extracts topics, detects frequency patterns, and identifies rising trends across papers."
                         />
-                    </form>
-
-                    {questionPaper && (
-                        <QuestionPaper
-                            paperData={questionPaper}
-                            onDownloadPDF={handleDownloadPDF}
-                            onDownloadJSON={handleDownloadJSON}
+                        <FeatureCard
+                            icon="🎯"
+                            title="3. Predict"
+                            description="Get a complete predicted question paper with per-question confidence scores and topic coverage analysis."
                         />
-                    )}
-                </MainCard>
+                    </div>
+                </div>
 
-                <Footer />
+                {/* Tech Banner */}
+                <div
+                    style={{
+                        position: "relative",
+                        zIndex: 10,
+                        padding: "40px 24px 80px",
+                        textAlign: "center",
+                    }}
+                >
+                    <p
+                        style={{
+                            color: "var(--text-muted)",
+                            fontSize: "0.8rem",
+                            marginBottom: 16,
+                            letterSpacing: "0.05em",
+                        }}
+                    >
+                        BUILT WITH
+                    </p>
+                    <div
+                        style={{
+                            display: "flex",
+                            justifyContent: "center",
+                            gap: 32,
+                            flexWrap: "wrap",
+                            color: "var(--text-muted)",
+                            fontSize: "0.85rem",
+                            fontWeight: 500,
+                        }}
+                    >
+                        <span>FastAPI</span>
+                        <span>•</span>
+                        <span>Next.js</span>
+                        <span>•</span>
+                        <span>LiteLLM</span>
+                        <span>•</span>
+                        <span>PostgreSQL</span>
+                        <span>•</span>
+                        <span>ChromaDB</span>
+                    </div>
+                </div>
             </div>
+        </>
+    );
+}
+
+function FeatureCard({
+    icon,
+    title,
+    description,
+}: {
+    icon: string;
+    title: string;
+    description: string;
+}) {
+    return (
+        <div className="glass-card" style={{ padding: 28 }}>
+            <div
+                style={{
+                    width: 52,
+                    height: 52,
+                    borderRadius: "var(--radius-md)",
+                    background: "var(--gradient-surface)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "1.5rem",
+                    marginBottom: 16,
+                    border: "1px solid var(--border-subtle)",
+                }}
+            >
+                {icon}
+            </div>
+            <h3
+                style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: 8 }}
+            >
+                {title}
+            </h3>
+            <p
+                style={{
+                    color: "var(--text-secondary)",
+                    fontSize: "0.85rem",
+                    lineHeight: 1.6,
+                    margin: 0,
+                }}
+            >
+                {description}
+            </p>
         </div>
     );
-};
-
-export default Home;
+}
