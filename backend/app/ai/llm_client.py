@@ -171,8 +171,14 @@ class LLMClient:
                 )
 
                 if attempt < self.max_retries:
-                    delay = self.retry_delay * (2 ** (attempt - 1))  # Exponential backoff
-                    logger.info("llm_retry_waiting", delay_seconds=delay)
+                    err_msg = str(e).lower()
+                    if "429" in err_msg or "rate" in err_msg or "exhausted" in err_msg or "resource_exhausted" in err_msg:
+                        delay = 15.0
+                        logger.info("llm_rate_limit_detected_waiting_15s", attempt=attempt)
+                    else:
+                        delay = self.retry_delay * (2 ** (attempt - 1))  # Exponential backoff
+                        logger.info("llm_retry_waiting", delay_seconds=delay)
+                    
                     import asyncio
                     await asyncio.sleep(delay)
 

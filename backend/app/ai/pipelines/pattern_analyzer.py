@@ -15,9 +15,12 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-TOPIC_EXTRACTION_PROMPT = """Analyze this question paper text and extract the topics covered.
+TOPIC_EXTRACTION_PROMPT = """Analyze this question paper text and extract the topics covered, questions details, and overall exam metadata.
 
-For each question, identify the main topic it belongs to. Return a JSON object with:
+Return a JSON object with:
+- "max_marks": integer or null (maximum marks of the exam paper, e.g. 60 or 100)
+- "duration": string or null (duration of the exam, e.g. "3 Hours", "2 Hours")
+- "instructions": array of strings (exam instructions list, e.g. ["Attempt all questions", "Scientific calculators allowed"])
 - "questions": array of objects, each with:
     - "question_number": integer
     - "question_text": string (brief summary)
@@ -41,15 +44,15 @@ class PatternAnalyzer:
     def __init__(self, llm_client: LLMClient | None = None):
         self.llm = llm_client or LLMClient()
 
-    async def extract_topics_from_paper(self, paper_text: str) -> list[dict[str, Any]]:
+    async def extract_topics_from_paper(self, paper_text: str) -> dict[str, Any]:
         """
-        Extract topics from a single question paper using LLM.
+        Extract topics and metadata from a single question paper using LLM.
 
         Returns:
-            List of question dicts with topic annotations.
+            Dict containing questions list, max_marks, duration, instructions.
         """
         if not paper_text.strip():
-            return []
+            return {"questions": []}
 
         prompt = TOPIC_EXTRACTION_PROMPT.format(
             paper_text=paper_text[:6000]
@@ -60,14 +63,14 @@ class PatternAnalyzer:
                 prompt=prompt,
                 system_prompt=(
                     "You are an academic content analyzer. "
-                    "Extract question topics precisely. Return valid JSON only."
+                    "Extract question topics and exam metadata precisely. Return valid JSON only."
                 ),
                 temperature=0.1,
             )
-            return result.get("questions", [])
+            return result
         except Exception as e:
             logger.warning("topic_extraction_failed", error=str(e))
-            return []
+            return {"questions": []}
 
     async def analyze_frequency(
         self,
@@ -85,11 +88,25 @@ class PatternAnalyzer:
         all_topics: list[str] = []
         topic_by_session: dict[str, list[str]] = defaultdict(list)
         questions_by_paper: list[list[dict]] = []
+        max_marks_list: list[int] = []
+        durations_list: list[str] = []
 
         for paper in papers:
             session = paper.get("session", "Unknown")
-            questions = await self.extract_topics_from_paper(paper["text"])
+            paper_data = await self.extract_topics_from_paper(paper["text"])
+            questions = paper_data.get("questions", [])
             questions_by_paper.append(questions)
+
+            # Retrieve paper-level metadata
+            max_marks = paper_data.get("max_marks")
+            if max_marks is not None:
+                try:
+                    max_marks_list.append(int(max_marks))
+                except (ValueError, TypeError):
+                    pass
+            duration = paper_data.get("duration")
+            if duration:
+                durations_list.append(str(duration).strip())
 
             for q in questions:
                 topic = q.get("topic", "")
@@ -110,6 +127,41 @@ class PatternAnalyzer:
                 "trend": self._calculate_trend(topic, topic_by_session),
             })
 
+        # Aggregate typical metadata
+        most_common_max_marks = Counter(max_marks_list).most_common(1)
+        most_common_duration = Counter(durations_list).most_common(1)
+
+        typical_max_marks = most_common_max_marks[0][0] if most_common_max_marks else 100
+        typical_duration = most_common_duration[0][0] if most_common_duration else "3 Hours"
+
+        # Calculate typical question types and marks
+        question_types_counts = defaultdict(int)
+        question_types_marks = defaultdict(list)
+        for paper_qs in questions_by_paper:
+            for q in paper_qs:
+                q_type = q.get("question_type", "medium")
+                q_marks = q.get("marks")
+                if q_marks is not None:
+                    try:
+                        q_marks = int(q_marks)
+                        question_types_marks[q_type].append(q_marks)
+                        question_types_counts[q_type] += 1
+                    except (ValueError, TypeError):
+                        pass
+
+        format_summary = []
+        num_papers = max(len(papers), 1)
+        for q_type in ["short", "medium", "long"]:
+            count = question_types_counts[q_type]
+            marks_list = question_types_marks[q_type]
+            if count > 0:
+                avg_count_per_paper = round(count / num_papers, 1)
+                typical_marks = Counter(marks_list).most_common(1)[0][0] if marks_list else 0
+                format_summary.append(
+                    f"- {q_type.capitalize()} questions: typical marks = {typical_marks}, average count per paper = {avg_count_per_paper}"
+                )
+        typical_format_str = "\n".join(format_summary) if format_summary else "No typical format patterns detected."
+
         # Detect patterns
         patterns = {
             "total_papers_analyzed": len(papers),
@@ -122,6 +174,9 @@ class PatternAnalyzer:
                 t["topic"] for t in frequency_data
                 if t["trend"] == "stable" and t["count"] >= 2
             ],
+            "max_marks": typical_max_marks,
+            "duration": typical_duration,
+            "typical_question_format": typical_format_str,
         }
 
         logger.info(
@@ -129,6 +184,8 @@ class PatternAnalyzer:
             total_papers=len(papers),
             total_questions=total_questions,
             unique_topics=len(topic_counts),
+            max_marks=typical_max_marks,
+            duration=typical_duration,
         )
 
         return {

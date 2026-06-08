@@ -45,6 +45,9 @@ Topics by unit:
 - Falling topics (appearing less recently): {falling_topics}
 - Consistent topics (always appear): {consistent_topics}
 
+## Typical Question Format Pattern
+{typical_question_format}
+
 ## Historical Paper Format
 - Number of papers analyzed: {num_papers}
 - Typical number of questions: {typical_num_questions}
@@ -55,6 +58,10 @@ Topics by unit:
 {sample_questions}
 
 ---
+
+## Instructions
+1. The sections, question types (short/medium/long), counts, and marks distribution of the predicted paper MUST closely follow the "Typical Question Format Pattern" and typical question format from historical papers.
+2. The sum of total marks for all questions in the sections MUST equal {max_marks} exactly. For example, if max_marks is 60, make sure all questions' marks sum to 60.
 
 Generate a complete predicted question paper as a JSON object with this EXACT structure:
 {{
@@ -155,6 +162,7 @@ class Predictor:
             typical_num_questions=typical_q,
             max_marks=metadata.get("max_marks", "100"),
             duration=metadata.get("duration", "3 Hours"),
+            typical_question_format=metadata.get("typical_format", "No typical format patterns detected."),
             next_year=next_year,
             sample_questions=sample_q_text,
         )
@@ -244,15 +252,9 @@ class Predictor:
                 "date": "Predicted",
                 "instructions": ["Answer all questions"],
             },
-            sections=[
-                PredictedSection(
-                    section_name="Section A",
-                    title="Questions",
-                    description=f"Prediction generation encountered an error: {error_msg}. Please retry.",
-                    questions=[],
-                    total_marks=0,
-                )
-            ],
+            sections=[],
             total_questions=0,
             overall_confidence=0.0,
+            is_fallback=True,
+            error_message=error_msg,
         )

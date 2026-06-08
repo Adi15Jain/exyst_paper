@@ -38,6 +38,15 @@ class Evaluator:
         Returns:
             ConfidenceReport with per-factor and overall scores.
         """
+        if getattr(paper, "is_fallback", False) or paper.total_questions == 0:
+            return ConfidenceReport(
+                overall_confidence=0.0,
+                topic_coverage_score=0.0,
+                historical_alignment_score=0.0,
+                question_quality_score=0.0,
+                per_question_confidence=[],
+            )
+
         topic_coverage = self._score_topic_coverage(paper, syllabus)
         question_quality = self._score_question_quality(paper)
         historical_alignment = self._score_historical_alignment(paper, frequency_data)

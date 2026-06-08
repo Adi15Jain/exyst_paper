@@ -32,6 +32,29 @@ export default function DocumentDetailPage() {
         "prediction" | "analysis" | "confidence"
     >("prediction");
     const [loading, setLoading] = useState(true);
+    const [regenerating, setRegenerating] = useState(false);
+
+    const handleRegenerate = async () => {
+        if (!id) return;
+        setRegenerating(true);
+        try {
+            const docId = id as string;
+            const newPred = await predictionsApi.generate(docId);
+            setPrediction(newPred);
+            const topicFreq = await analyticsApi
+                .topicFrequency(docId)
+                .catch(() => null);
+            if (topicFreq) setTopicData(topicFreq);
+        } catch (err) {
+            alert(
+                err instanceof Error
+                    ? err.message
+                    : "Failed to generate prediction",
+            );
+        } finally {
+            setRegenerating(false);
+        }
+    };
 
     useEffect(() => {
         if (authLoading || !user || !id) return;
@@ -167,218 +190,346 @@ export default function DocumentDetailPage() {
                 {/* Tab Content */}
                 {activeTab === "prediction" && paper && (
                     <div className="animate-fade-in">
-                        {/* Paper Header */}
-                        <div
-                            className="glass-card"
-                            style={{
-                                padding: 24,
-                                marginBottom: 20,
-                                textAlign: "center",
-                            }}
-                        >
-                            <h2
-                                style={{
-                                    fontSize: "1.2rem",
-                                    fontWeight: 800,
-                                    margin: 0,
-                                }}
-                            >
-                                {paper.paper_info?.title ||
-                                    "Predicted Question Paper"}
-                            </h2>
-                            <p
-                                style={{
-                                    color: "var(--accent-violet)",
-                                    fontSize: "1rem",
-                                    margin: "4px 0 12px",
-                                }}
-                            >
-                                {paper.paper_info?.subject || ""}
-                            </p>
+                        {paper.is_fallback ? (
                             <div
-                                style={{
-                                    display: "flex",
-                                    justifyContent: "center",
-                                    gap: 24,
-                                    color: "var(--text-muted)",
-                                    fontSize: "0.8rem",
-                                }}
-                            >
-                                <span>
-                                    📅 {paper.paper_info?.academic_year || ""}
-                                </span>
-                                <span>
-                                    ⏱ {paper.paper_info?.duration || ""}
-                                </span>
-                                <span>
-                                    📊 Max Marks:{" "}
-                                    {paper.paper_info?.max_marks || ""}
-                                </span>
-                            </div>
-                        </div>
-
-                        {/* Sections */}
-                        {paper.sections?.map((section: any, sIdx: number) => (
-                            <div
-                                key={sIdx}
                                 className="glass-card"
-                                style={{ padding: 24, marginBottom: 16 }}
+                                style={{
+                                    padding: 40,
+                                    textAlign: "center",
+                                    marginBottom: 20,
+                                    border: "1px solid rgba(239, 68, 68, 0.2)",
+                                    background: "rgba(239, 68, 68, 0.02)",
+                                }}
                             >
-                                <div
+                                <span
                                     style={{
-                                        display: "flex",
-                                        justifyContent: "space-between",
-                                        alignItems: "center",
+                                        fontSize: "3rem",
+                                        display: "block",
                                         marginBottom: 16,
                                     }}
                                 >
-                                    <div>
-                                        <h3
+                                    ⚠️
+                                </span>
+                                <h3
+                                    style={{
+                                        fontSize: "1.2rem",
+                                        fontWeight: 700,
+                                        marginBottom: 10,
+                                        color: "var(--text-primary)",
+                                    }}
+                                >
+                                    Prediction Generation Failed
+                                </h3>
+                                <p
+                                    style={{
+                                        color: "var(--text-muted)",
+                                        fontSize: "0.85rem",
+                                        lineHeight: 1.6,
+                                        marginBottom: 28,
+                                        maxWidth: 580,
+                                        margin: "0 auto 28px",
+                                    }}
+                                >
+                                    {paper.error_message ||
+                                        "An unexpected error occurred during prediction generation."}
+                                </p>
+                                <button
+                                    className="btn-primary"
+                                    onClick={handleRegenerate}
+                                    disabled={regenerating}
+                                    style={{
+                                        padding: "10px 24px",
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: 8,
+                                        fontSize: "0.85rem",
+                                    }}
+                                >
+                                    {regenerating && (
+                                        <span
+                                            className="spinner"
+                                            style={{ width: 14, height: 14 }}
+                                        />
+                                    )}
+                                    {regenerating
+                                        ? "Regenerating..."
+                                        : "Regenerate Prediction"}
+                                </button>
+                            </div>
+                        ) : (
+                            <>
+                                {/* Paper Header */}
+                                <div
+                                    className="glass-card"
+                                    style={{
+                                        padding: 24,
+                                        marginBottom: 20,
+                                    }}
+                                >
+                                    <div
+                                        style={{
+                                            display: "flex",
+                                            justifyContent: "space-between",
+                                            alignItems: "center",
+                                            marginBottom: 12,
+                                            flexWrap: "wrap",
+                                            gap: 12,
+                                        }}
+                                    >
+                                        <h2
                                             style={{
-                                                fontSize: "1rem",
-                                                fontWeight: 700,
+                                                fontSize: "1.2rem",
+                                                fontWeight: 800,
                                                 margin: 0,
                                             }}
                                         >
-                                            {section.section_name}:{" "}
-                                            {section.title}
-                                        </h3>
-                                        <p
+                                            {paper.paper_info?.title ||
+                                                "Predicted Question Paper"}
+                                        </h2>
+                                        <button
+                                            className="btn-secondary"
+                                            onClick={handleRegenerate}
+                                            disabled={regenerating}
                                             style={{
-                                                color: "var(--text-muted)",
+                                                padding: "6px 12px",
                                                 fontSize: "0.8rem",
-                                                margin: "4px 0 0",
+                                                display: "inline-flex",
+                                                alignItems: "center",
+                                                gap: 6,
+                                                margin: 0,
                                             }}
                                         >
-                                            {section.description}
-                                        </p>
+                                            {regenerating && (
+                                                <span
+                                                    className="spinner"
+                                                    style={{
+                                                        width: 12,
+                                                        height: 12,
+                                                    }}
+                                                />
+                                            )}
+                                            {regenerating
+                                                ? "Regenerating..."
+                                                : "🔄 Regenerate"}
+                                        </button>
                                     </div>
-                                    <span className="badge badge-info">
-                                        {section.total_marks} marks
-                                    </span>
+                                    <p
+                                        style={{
+                                            color: "var(--accent-violet)",
+                                            fontSize: "1rem",
+                                            margin: "4px 0 12px",
+                                            textAlign: "left",
+                                        }}
+                                    >
+                                        {paper.paper_info?.subject || ""}
+                                    </p>
+                                    <div
+                                        style={{
+                                            display: "flex",
+                                            justifyContent: "flex-start",
+                                            gap: 24,
+                                            color: "var(--text-muted)",
+                                            fontSize: "0.8rem",
+                                        }}
+                                    >
+                                        <span>
+                                            📅{" "}
+                                            {paper.paper_info?.academic_year ||
+                                                ""}
+                                        </span>
+                                        <span>
+                                            ⏱ {paper.paper_info?.duration || ""}
+                                        </span>
+                                        <span>
+                                            📊 Max Marks:{" "}
+                                            {paper.paper_info?.max_marks || ""}
+                                        </span>
+                                    </div>
                                 </div>
 
-                                <div
-                                    style={{
-                                        display: "flex",
-                                        flexDirection: "column",
-                                        gap: 12,
-                                    }}
-                                >
-                                    {section.questions?.map(
-                                        (q: any, qIdx: number) => (
+                                {/* Sections */}
+                                {paper.sections?.map(
+                                    (section: any, sIdx: number) => (
+                                        <div
+                                            key={sIdx}
+                                            className="glass-card"
+                                            style={{
+                                                padding: 24,
+                                                marginBottom: 16,
+                                            }}
+                                        >
                                             <div
-                                                key={qIdx}
                                                 style={{
-                                                    padding: "14px 16px",
-                                                    borderRadius:
-                                                        "var(--radius-md)",
-                                                    background:
-                                                        "rgba(255, 255, 255, 0.02)",
-                                                    borderLeft: `3px solid ${getConfidenceColor(q.confidence || 0.5)}`,
+                                                    display: "flex",
+                                                    justifyContent:
+                                                        "space-between",
+                                                    alignItems: "center",
+                                                    marginBottom: 16,
                                                 }}
                                             >
-                                                <div
-                                                    style={{
-                                                        display: "flex",
-                                                        justifyContent:
-                                                            "space-between",
-                                                        alignItems:
-                                                            "flex-start",
-                                                    }}
-                                                >
-                                                    <div
+                                                <div>
+                                                    <h3
                                                         style={{
-                                                            flex: 1,
-                                                            paddingRight: 16,
+                                                            fontSize: "1rem",
+                                                            fontWeight: 700,
+                                                            margin: 0,
                                                         }}
                                                     >
-                                                        <p
+                                                        {section.section_name}:{" "}
+                                                        {section.title}
+                                                    </h3>
+                                                    <p
+                                                        style={{
+                                                            color: "var(--text-muted)",
+                                                            fontSize: "0.8rem",
+                                                            margin: "4px 0 0",
+                                                        }}
+                                                    >
+                                                        {section.description}
+                                                    </p>
+                                                </div>
+                                                <span className="badge badge-info">
+                                                    {section.total_marks} marks
+                                                </span>
+                                            </div>
+
+                                            <div
+                                                style={{
+                                                    display: "flex",
+                                                    flexDirection: "column",
+                                                    gap: 12,
+                                                }}
+                                            >
+                                                {section.questions?.map(
+                                                    (q: any, qIdx: number) => (
+                                                        <div
+                                                            key={qIdx}
                                                             style={{
-                                                                margin: 0,
-                                                                fontSize:
-                                                                    "0.85rem",
-                                                                lineHeight: 1.5,
+                                                                padding:
+                                                                    "14px 16px",
+                                                                borderRadius:
+                                                                    "var(--radius-md)",
+                                                                background:
+                                                                    "rgba(255, 255, 255, 0.02)",
+                                                                borderLeft: `3px solid ${getConfidenceColor(q.confidence || 0.5)}`,
                                                             }}
                                                         >
-                                                            <strong>
-                                                                Q
-                                                                {
-                                                                    q.question_number
-                                                                }
-                                                                .
-                                                            </strong>{" "}
-                                                            {q.question_text}
-                                                        </p>
-                                                        {q.topic && (
-                                                            <span
+                                                            <div
                                                                 style={{
                                                                     display:
-                                                                        "inline-block",
-                                                                    marginTop: 6,
-                                                                    fontSize:
-                                                                        "0.7rem",
-                                                                    padding:
-                                                                        "2px 8px",
-                                                                    borderRadius: 999,
-                                                                    background:
-                                                                        "rgba(99, 102, 241, 0.1)",
-                                                                    color: "var(--accent-indigo)",
+                                                                        "flex",
+                                                                    justifyContent:
+                                                                        "space-between",
+                                                                    alignItems:
+                                                                        "flex-start",
                                                                 }}
                                                             >
-                                                                {q.topic}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    <div
-                                                        style={{
-                                                            textAlign: "right",
-                                                            flexShrink: 0,
-                                                        }}
-                                                    >
-                                                        <span
-                                                            style={{
-                                                                fontSize:
-                                                                    "0.75rem",
-                                                                fontWeight: 700,
-                                                                color: "var(--text-secondary)",
-                                                                background:
-                                                                    "rgba(255,255,255,0.05)",
-                                                                padding:
-                                                                    "4px 10px",
-                                                                borderRadius:
-                                                                    "var(--radius-sm)",
-                                                            }}
-                                                        >
-                                                            {q.marks} marks
-                                                        </span>
-                                                        {q.confidence !==
-                                                            undefined && (
-                                                            <p
-                                                                style={{
-                                                                    margin: "4px 0 0",
-                                                                    fontSize:
-                                                                        "0.7rem",
-                                                                    color: getConfidenceColor(
-                                                                        q.confidence,
-                                                                    ),
-                                                                }}
-                                                            >
-                                                                {(
-                                                                    q.confidence *
-                                                                    100
-                                                                ).toFixed(0)}
-                                                                % conf
-                                                            </p>
-                                                        )}
-                                                    </div>
-                                                </div>
+                                                                <div
+                                                                    style={{
+                                                                        flex: 1,
+                                                                        paddingRight: 16,
+                                                                    }}
+                                                                >
+                                                                    <p
+                                                                        style={{
+                                                                            margin: 0,
+                                                                            fontSize:
+                                                                                "0.85rem",
+                                                                            lineHeight: 1.5,
+                                                                        }}
+                                                                    >
+                                                                        <strong>
+                                                                            Q
+                                                                            {
+                                                                                q.question_number
+                                                                            }
+                                                                            .
+                                                                        </strong>{" "}
+                                                                        {
+                                                                            q.question_text
+                                                                        }
+                                                                    </p>
+                                                                    {q.topic && (
+                                                                        <span
+                                                                            style={{
+                                                                                display:
+                                                                                    "inline-block",
+                                                                                marginTop: 6,
+                                                                                fontSize:
+                                                                                    "0.7rem",
+                                                                                padding:
+                                                                                    "2px 8px",
+                                                                                borderRadius: 999,
+                                                                                background:
+                                                                                    "rgba(99, 102, 241, 0.1)",
+                                                                                color: "var(--accent-indigo)",
+                                                                            }}
+                                                                        >
+                                                                            {
+                                                                                q.topic
+                                                                            }
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <div
+                                                                    style={{
+                                                                        textAlign:
+                                                                            "right",
+                                                                        flexShrink: 0,
+                                                                    }}
+                                                                >
+                                                                    <span
+                                                                        style={{
+                                                                            fontSize:
+                                                                                "0.75rem",
+                                                                            fontWeight: 700,
+                                                                            color: "var(--text-secondary)",
+                                                                            background:
+                                                                                "rgba(255,255,255,0.05)",
+                                                                            padding:
+                                                                                "4px 10px",
+                                                                            borderRadius:
+                                                                                "var(--radius-sm)",
+                                                                        }}
+                                                                    >
+                                                                        {
+                                                                            q.marks
+                                                                        }{" "}
+                                                                        marks
+                                                                    </span>
+                                                                    {q.confidence !==
+                                                                        undefined && (
+                                                                        <p
+                                                                            style={{
+                                                                                margin: "4px 0 0",
+                                                                                fontSize:
+                                                                                    "0.7rem",
+                                                                                color: getConfidenceColor(
+                                                                                    q.confidence,
+                                                                                ),
+                                                                            }}
+                                                                        >
+                                                                            {(
+                                                                                q.confidence *
+                                                                                100
+                                                                            ).toFixed(
+                                                                                0,
+                                                                            )}
+                                                                            %
+                                                                            conf
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ),
+                                                )}
                                             </div>
-                                        ),
-                                    )}
-                                </div>
-                            </div>
-                        ))}
+                                        </div>
+                                    ),
+                                )}
+                            </>
+                        )}
                     </div>
                 )}
 
@@ -695,9 +846,24 @@ export default function DocumentDetailPage() {
                                 marginBottom: 20,
                             }}
                         >
-                            Run the analysis pipeline to generate a predicted
-                            paper
+                            Generate a predicted question paper using AI based on the syllabus and past papers.
                         </p>
+                        <button
+                            className="btn-primary"
+                            onClick={handleRegenerate}
+                            disabled={regenerating}
+                            style={{
+                                padding: "10px 24px",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 8,
+                                fontSize: "0.85rem",
+                                margin: "0 auto",
+                            }}
+                        >
+                            {regenerating && <span className="spinner" style={{ width: 14, height: 14 }} />}
+                            {regenerating ? "Generating..." : "Generate Prediction"}
+                        </button>
                     </div>
                 )}
             </AppLayout>

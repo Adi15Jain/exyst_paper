@@ -1,7 +1,7 @@
 """
 Document classifier — determines whether a page is from a syllabus or question paper.
 
-Uses LLM classification with few-shot prompting for accuracy.
+Uses LLM classification with batch processing for speed and quota efficiency.
 """
 
 from typing import Literal
@@ -11,31 +11,27 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-CLASSIFIER_SYSTEM_PROMPT = """You are a strict academic document classifier.
-You classify individual pages of text into exactly one category.
-You MUST return ONLY a valid JSON object with a single key "classification".
+CLASSIFIER_BATCH_SYSTEM_PROMPT = """You are a strict academic document classifier.
+You classify a list of document pages into categories: "question_paper" or "syllabus".
+You MUST return ONLY a valid JSON object matching the requested schema.
 Do not include any other text, explanation, or markdown formatting."""
 
-CLASSIFIER_USER_PROMPT = """Classify this page into one of these categories:
+CLASSIFIER_BATCH_USER_PROMPT = """Classify each of the following pages into "question_paper" or "syllabus".
 
-1. "question_paper" — if the content contains:
-   - Exam-style questions (Q1, Q2, etc.)
-   - Time/marks indicators (e.g., "Time: 3 Hours", "Max. Marks: 60")
-   - Instructions like "Attempt all questions"
-   - Academic sessions (e.g., "2023-24", "May 2024")
+Categories definition:
+- "question_paper": exam papers, questions (Q1, Q2), marks, duration, year/session (e.g. "2023-24").
+- "syllabus": course structures, syllabus units, textbooks, reference books, course outcomes.
 
-2. "syllabus" — if the content contains:
-   - Unit/module structure (e.g., "Unit I", "Module 2")
-   - Course content or learning objectives
-   - Textbooks or reference books
-   - Course outcomes
+Pages list:
+{pages_data}
 
-Return a JSON object: {{"classification": "question_paper"}} or {{"classification": "syllabus"}}
-
----
-
-Page text:
-{page_text}
+Return a JSON object with this structure:
+{{
+    "classifications": [
+        {{"page_number": 1, "classification": "syllabus"}},
+        {{"page_number": 2, "classification": "question_paper"}}
+    ]
+}}
 """
 
 
@@ -46,46 +42,6 @@ class Classifier:
 
     def __init__(self, llm_client: LLMClient | None = None):
         self.llm = llm_client or LLMClient()
-
-    async def classify_page(self, page_text: str) -> Literal["question_paper", "syllabus"]:
-        """
-        Classify a single page of text.
-
-        Returns:
-            "question_paper" or "syllabus"
-        """
-        if not page_text.strip():
-            return "question_paper"  # Default for empty pages
-
-        # Truncate for token limits
-        prompt = CLASSIFIER_USER_PROMPT.format(page_text=page_text[:3000])
-
-        try:
-            result = await self.llm.complete_json(
-                prompt=prompt,
-                system_prompt=CLASSIFIER_SYSTEM_PROMPT,
-                temperature=0.0,
-            )
-
-            classification = result.get("classification", "question_paper").lower().strip()
-
-            if classification not in ("question_paper", "syllabus"):
-                logger.warning(
-                    "unexpected_classification",
-                    raw_value=classification,
-                    defaulting_to="question_paper",
-                )
-                classification = "question_paper"
-
-            return classification  # type: ignore
-
-        except Exception as e:
-            logger.warning(
-                "classification_failed",
-                error=str(e),
-                defaulting_to="question_paper",
-            )
-            return "question_paper"
 
     async def classify_document(
         self, pages: list[dict]
@@ -99,6 +55,42 @@ class Classifier:
         Returns:
             Dict with 'syllabus_text', 'question_paper_text', and 'page_classifications'.
         """
+        if not pages:
+            return {
+                "syllabus_text": "",
+                "question_paper_text": "",
+                "page_classifications": [],
+                "syllabus_page_count": 0,
+                "question_paper_page_count": 0,
+            }
+
+        # Build batch pages data context
+        pages_data = ""
+        for page in pages:
+            page_num = page["page_number"]
+            # Extract first 1500 chars of page text for classification
+            snippet = page["text"][:1500].replace("{", "{{").replace("}", "}}")
+            pages_data += f"--- Page {page_num} ---\n{snippet}\n\n"
+
+        prompt = CLASSIFIER_BATCH_USER_PROMPT.format(pages_data=pages_data)
+
+        try:
+            result = await self.llm.complete_json(
+                prompt=prompt,
+                system_prompt=CLASSIFIER_BATCH_SYSTEM_PROMPT,
+                temperature=0.0,
+            )
+
+            classifications_list = result.get("classifications", [])
+            classifications_map = {
+                item.get("page_number"): item.get("classification", "question_paper").lower().strip()
+                for item in classifications_list
+                if "page_number" in item
+            }
+        except Exception as e:
+            logger.warning("batch_classification_failed", error=str(e))
+            classifications_map = {}
+
         syllabus_pages: list[str] = []
         question_pages: list[str] = []
         page_classifications: list[dict] = []
@@ -107,7 +99,9 @@ class Classifier:
             page_num = page["page_number"]
             text = page["text"]
 
-            classification = await self.classify_page(text)
+            classification = classifications_map.get(page_num, "question_paper")
+            if classification not in ("question_paper", "syllabus"):
+                classification = "question_paper"
 
             logger.info(
                 "page_classified",

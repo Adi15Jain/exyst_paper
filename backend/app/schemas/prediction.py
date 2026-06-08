@@ -65,6 +65,8 @@ class PredictedPaper(BaseModel):
         ge=0.0, le=1.0, default=0.5,
         description="Overall prediction confidence"
     )
+    is_fallback: bool = False
+    error_message: str | None = None
 
 
 # --- API Response Models ---

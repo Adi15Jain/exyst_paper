@@ -76,13 +76,18 @@ class PredictionService:
             )
 
             max_marks = "100"
+            duration = "3 Hours"
+            typical_format = "No typical format patterns detected."
             if analysis.pattern_analysis:
                 max_marks = str(analysis.pattern_analysis.get("max_marks", "100"))
+                duration = str(analysis.pattern_analysis.get("duration", "3 Hours"))
+                typical_format = analysis.pattern_analysis.get("typical_question_format", typical_format)
 
             metadata: dict[str, str | None] = {
                 "subject": syllabus.course_title or "Unknown",
                 "max_marks": max_marks,
-                "duration": "3 Hours",
+                "duration": duration,
+                "typical_format": typical_format,
             }
 
             # 4. Prepare frequency data
