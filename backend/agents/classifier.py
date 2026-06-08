@@ -1,5 +1,9 @@
+"""Legacy standalone classifier — uses Google AI Studio (Gemini) directly."""
+
 from typing import Literal
-from litellm import completion
+
+from google import genai
+from google.genai import types
 from pdfminer.high_level import extract_pages
 from pdfminer.layout import LTTextContainer
 import os
@@ -7,10 +11,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ✅ Set your API Key
-api_key = os.environ.get("GEMINI_API_KEY") 
+# Initialize Gemini client
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-# ✅ Classify a page of text using Gemini
+
 def classify_chunk_with_llm(text: str) -> Literal["question_paper", "syllabus"]:
     prompt = f"""
     You are a strict academic document classifier.
@@ -37,50 +41,29 @@ def classify_chunk_with_llm(text: str) -> Literal["question_paper", "syllabus"]:
     Do not explain your answer. Do not add any extra text.
     ---
 
-    ### Examples
-
-    **Example 1:**
-    Text:
-    Q1. Answer the following:  
-    a) Define crossover.  
-    b) Explain mutation in genetic algorithms.  
-    Max. Marks: 60  
-    Time: 3 Hours  
-    Classification: question_paper
-
-    **Example 2:**
-    Text:
-    Unit I: Introduction to Genetic Algorithms  
-    Course Outcomes:  
-    - Understand fitness functions  
-    Textbooks: Goldberg D.E.  
-    Classification: syllabus
-
-    ---
-
     ### Classify this page:
     {text}
 
     Classification:
     """
 
-    response = completion(
-        model="gemini/gemini-2.5-flash",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.0,
-        stream=False
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(temperature=0.0),
     )
 
-    output = response.choices[0].message["content"].strip().lower()     #type:ignore
-    return output
-        
-    
+    output = (response.text or "").strip().lower()
+    if output in ("question_paper", "syllabus"):
+        return output  # type: ignore[return-value]
+    return "question_paper"
+
+
 def split_pdf_by_classification(pdf_path: str):
     question_pages = []
     syllabus_pages = []
 
     for i, page_layout in enumerate(extract_pages(pdf_path)):
-        # Concatenate text from all containers (blocks) on this page
         text = ""
         for element in page_layout:
             if isinstance(element, LTTextContainer):
@@ -89,7 +72,7 @@ def split_pdf_by_classification(pdf_path: str):
 
         print(f"\n🔍 Classifying Page {i+1}...")
         tag = classify_chunk_with_llm(text)
-        print(f"🧠 LLM says: {tag}")
+        print(f"🧠 Gemini says: {tag}")
 
         if tag == "syllabus":
             syllabus_pages.append(text)

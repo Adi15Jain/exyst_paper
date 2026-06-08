@@ -1,4 +1,7 @@
-from litellm import completion
+"""Legacy standalone question paper analyzer — uses Google AI Studio (Gemini) directly."""
+
+from google import genai
+from google.genai import types
 import os
 from dotenv import load_dotenv
 import re
@@ -7,25 +10,39 @@ from typing import Dict, List, Any, Optional
 
 load_dotenv()
 
-api_key = os.environ.get("GEMINI_API_KEY")
+# Initialize Gemini client
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
+MODEL = "gemini-2.5-flash"
 
 
 def _clean_llm_json(extracted: str) -> str:
     if not extracted:
         return ""
-    # Remove starting ```
     extracted = re.sub(r"^\s*```json\s*", "", extracted.strip(), flags=re.IGNORECASE)
-    # Remove leading/trailing ```
     extracted = re.sub(r"^\s*```\s*", "", extracted)
-    # extracted = re.sub(r"\s*```\s*$")
+    extracted = re.sub(r"\s*```\s*$", "", extracted)
     return extracted.strip()
 
 
+def _gemini_call(prompt: str, temperature: float = 0.2) -> str:
+    """Helper to make a Gemini API call and return raw text."""
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            temperature=temperature,
+            response_mime_type="application/json",
+        ),
+    )
+    return (response.text or "").strip()
+
+
 def analyze_question_paper(question_paper_text: str) -> Dict[str, Any]:
-    """Analyze question paper text using LLM to extract structured information."""
+    """Analyze question paper text using Gemini to extract structured information."""
     if not question_paper_text.strip():
         return {"error": "Empty question paper text provided"}
-    
+
     prompt = f"""
     You are an academic question paper analyzer. Analyze the following question paper text and extract structured information in JSON format.
 
@@ -48,25 +65,13 @@ def analyze_question_paper(question_paper_text: str) -> Dict[str, Any]:
     """
 
     try:
-        response = completion(
-            model="gemini/gemini-2.5-flash",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            stream=False,
-        )
-
-        # Safe chain to avoid attribute errors
-        extracted = getattr(response.choices[0].message, "content", "")     #type: ignore
-        if extracted is None:
-            return {"error": "No response from LLM"}
-        extracted = extracted.strip()
+        extracted = _gemini_call(prompt)
         extracted = _clean_llm_json(extracted)
-
         return json.loads(extracted)
     except json.JSONDecodeError as e:
         return {
             "error": "Failed to parse JSON",
-            "raw_output": extracted,        #type: ignore
+            "raw_output": extracted,
             "exception": str(e),
             "analysis_status": "failed"
         }
@@ -81,7 +86,7 @@ def extract_question_patterns(question_paper_text: str) -> Dict[str, Any]:
     """Extract specific question patterns and formats from the question paper."""
     if not question_paper_text.strip():
         return {"error": "Empty question paper text provided"}
-    
+
     prompt = f"""
     Analyze this question paper and identify recurring patterns. Extract:
 
@@ -98,22 +103,11 @@ def extract_question_patterns(question_paper_text: str) -> Dict[str, Any]:
     """
 
     try:
-        response = completion(
-            model="gemini/gemini-2.5-flash",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            stream=False,
-        )
-
-        extracted = getattr(response.choices[0].message, "content", "")     #type: ignore
-        if extracted is None:
-            return {"error": "No response from LLM"}
-        extracted = extracted.strip()
+        extracted = _gemini_call(prompt, temperature=0.1)
         extracted = _clean_llm_json(extracted)
-
         return json.loads(extracted)
     except json.JSONDecodeError as e:
-        return {"patterns": "Could not extract patterns", "raw_output": extracted, "exception": str(e)}     #type: ignore
+        return {"patterns": "Could not extract patterns", "raw_output": extracted, "exception": str(e)}
     except Exception as e:
         return {"error": f"Pattern extraction failed: {str(e)}"}
 
@@ -124,7 +118,7 @@ def compare_question_papers(papers: List[str]) -> Dict[str, Any]:
         return {"error": "At least 2 question papers required for comparison"}
 
     combined_text = "\n\n--- PAPER SEPARATOR ---\n\n".join(papers)
-    
+
     prompt = f"""
     Compare these multiple question papers and identify:
 
@@ -143,22 +137,11 @@ def compare_question_papers(papers: List[str]) -> Dict[str, Any]:
     """
 
     try:
-        response = completion(
-            model="gemini/gemini-2.5-flash",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            stream=False,
-        )
-
-        extracted = getattr(response.choices[0].message, "content", "")     #type: ignore
-        if extracted is None:
-            return {"error": "No response from LLM"}
-        extracted = extracted.strip()
+        extracted = _gemini_call(prompt, temperature=0.3)
         extracted = _clean_llm_json(extracted)
-
         return json.loads(extracted)
     except json.JSONDecodeError as e:
-        return {"comparison": "Could not analyze papers", "raw_output": extracted, "exception": str(e)}     #type: ignore
+        return {"comparison": "Could not analyze papers", "raw_output": extracted, "exception": str(e)}
     except Exception as e:
         return {"error": f"Comparison failed: {str(e)}", "paper_count": len(papers)}
 
@@ -169,9 +152,9 @@ def predict_next_paper_structure(question_papers: List[str], syllabus_text: Opti
     """
     if not question_papers:
         return {"error": "No question papers provided for prediction"}
-    
+
     papers_text = "\n\n--- PAPER SEPARATOR ---\n\n".join(question_papers)
-    
+
     context = f"Historical Question Papers:\n{papers_text}"
     if syllabus_text:
         context += f"\n\nCurrent Syllabus:\n{syllabus_text}"
@@ -194,24 +177,13 @@ def predict_next_paper_structure(question_papers: List[str], syllabus_text: Opti
     """
 
     try:
-        response = completion(
-            model="gemini/gemini-2.5-flash",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.4,
-            stream=False,
-        )
-
-        extracted = getattr(response.choices[0].message, "content", "")     #type: ignore
-        if extracted is None:
-            return {"error": "No response from LLM"}
-        extracted = extracted.strip()
+        extracted = _gemini_call(prompt, temperature=0.4)
         extracted = _clean_llm_json(extracted)
-
         return json.loads(extracted)
     except json.JSONDecodeError as e:
         return {
             "prediction": "Could not generate prediction",
-            "raw_output": extracted,        #type: ignore
+            "raw_output": extracted,
             "exception": str(e),
             "input_papers": len(question_papers),
             "has_syllabus": syllabus_text is not None
@@ -230,12 +202,12 @@ def comprehensive_question_paper_analysis(question_paper_text: str) -> Dict[str,
     """
     if not question_paper_text.strip():
         return {"error": "Empty question paper text provided"}
-    
+
     basic_analysis = analyze_question_paper(question_paper_text)
     pattern_analysis = extract_question_patterns(question_paper_text)
-    
+
     return {
         "basic_analysis": basic_analysis,
         "pattern_analysis": pattern_analysis,
-        "analyzer_version": "1.0"
+        "analyzer_version": "2.0"
     }

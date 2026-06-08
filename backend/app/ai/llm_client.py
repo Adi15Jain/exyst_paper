@@ -1,18 +1,22 @@
 """
-Centralized LLM client with retry logic, structured output, and provider abstraction.
+Centralized LLM client using Google AI Studio (Gemini) directly.
 
 All LLM calls in the application go through this client, which provides:
-- Retry with exponential backoff
+- Retry with exponential backoff + rate-limit awareness
 - Structured JSON output enforcement
 - Token usage tracking
 - Error wrapping with ExystBaseError hierarchy
+
+Uses the official `google-genai` SDK exclusively — no litellm, no OpenAI.
 """
 
 import json
 import time
+import asyncio
 from typing import Any, TypeVar
 
-from litellm import acompletion
+from google import genai
+from google.genai import types
 from pydantic import BaseModel
 
 from app.config import get_settings
@@ -76,7 +80,7 @@ class LLMResponse:
 
 class LLMClient:
     """
-    Centralized LLM client for all AI operations.
+    Centralized LLM client using Google AI Studio (Gemini) directly.
 
     Usage:
         client = LLMClient()
@@ -95,6 +99,9 @@ class LLMClient:
         self.max_retries = max_retries
         self.retry_delay = retry_delay
 
+        # Initialize the Google GenAI client
+        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
     async def complete(
         self,
         prompt: str,
@@ -104,11 +111,11 @@ class LLMClient:
         response_format: dict[str, Any] | None = None,
     ) -> LLMResponse:
         """
-        Send a completion request to the LLM with retry logic.
+        Send a completion request to Gemini with retry logic.
 
         Args:
             prompt: The user message.
-            system_prompt: Optional system message for role instruction.
+            system_prompt: Optional system instruction.
             temperature: Sampling temperature (0.0 = deterministic).
             max_tokens: Max response tokens.
             response_format: Optional format enforcement (e.g., {"type": "json_object"}).
@@ -116,34 +123,52 @@ class LLMClient:
         Returns:
             LLMResponse with parsed content and metadata.
         """
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-
         last_error = None
 
         for attempt in range(1, self.max_retries + 1):
             try:
                 start_time = time.perf_counter()
 
-                kwargs: dict[str, Any] = {
-                    "model": self.model,
-                    "messages": messages,
+                # Build config
+                config_kwargs: dict[str, Any] = {
                     "temperature": temperature,
-                    "stream": False,
                 }
                 if max_tokens:
-                    kwargs["max_tokens"] = max_tokens
-                if response_format:
-                    kwargs["response_format"] = response_format
+                    config_kwargs["max_output_tokens"] = max_tokens
 
-                response = await acompletion(**kwargs)
+                # System instruction
+                if system_prompt:
+                    config_kwargs["system_instruction"] = system_prompt
+
+                # JSON mode
+                if response_format and response_format.get("type") == "json_object":
+                    config_kwargs["response_mime_type"] = "application/json"
+
+                config = types.GenerateContentConfig(**config_kwargs)
+
+                # Use run_in_executor to call the sync SDK method from async context
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: self.client.models.generate_content(
+                        model=self.model,
+                        contents=prompt,
+                        config=config,
+                    ),
+                )
 
                 latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
-                content = response.choices[0].message.content or ""  # type: ignore
-                usage = dict(response.usage) if response.usage else {}  # type: ignore
+                content = response.text or ""
+
+                # Extract usage metadata
+                usage: dict[str, int] = {}
+                if response.usage_metadata:
+                    usage = {
+                        "prompt_tokens": response.usage_metadata.prompt_token_count or 0,
+                        "completion_tokens": response.usage_metadata.candidates_token_count or 0,
+                        "total_tokens": response.usage_metadata.total_token_count or 0,
+                    }
 
                 logger.info(
                     "llm_call_success",
@@ -174,16 +199,15 @@ class LLMClient:
                     err_msg = str(e).lower()
                     if "429" in err_msg or "rate" in err_msg or "exhausted" in err_msg or "resource_exhausted" in err_msg:
                         delay = 15.0
-                        logger.info("llm_rate_limit_detected_waiting_15s", attempt=attempt)
+                        logger.info("gemini_rate_limit_detected_waiting_15s", attempt=attempt)
                     else:
                         delay = self.retry_delay * (2 ** (attempt - 1))  # Exponential backoff
-                        logger.info("llm_retry_waiting", delay_seconds=delay)
-                    
-                    import asyncio
+                        logger.info("gemini_retry_waiting", delay_seconds=delay)
+
                     await asyncio.sleep(delay)
 
         raise LLMError(
-            message=f"LLM call failed after {self.max_retries} attempts: {str(last_error)}",
+            message=f"Gemini call failed after {self.max_retries} attempts: {str(last_error)}",
             model=self.model,
         )
 

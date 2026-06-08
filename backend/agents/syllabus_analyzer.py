@@ -1,4 +1,7 @@
-from litellm import completion
+"""Legacy standalone syllabus analyzer — uses Google AI Studio (Gemini) directly."""
+
+from google import genai
+from google.genai import types
 import os
 from dotenv import load_dotenv
 import re
@@ -6,7 +9,9 @@ import json
 
 load_dotenv()
 
-api_key = os.environ.get("GEMINI_API_KEY") 
+# Initialize Gemini client
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
 
 def extract_syllabus_with_llm(syllabus_text: str) -> dict:
     prompt = f"""
@@ -18,14 +23,16 @@ def extract_syllabus_with_llm(syllabus_text: str) -> dict:
     {syllabus_text}
     """
 
-    response = completion(
-        model="gemini/gemini-2.5-flash",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
-        stream=False,
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            temperature=0.2,
+            response_mime_type="application/json",
+        ),
     )
 
-    extracted = response.choices[0].message["content"].strip()          #type: ignore
+    extracted = (response.text or "").strip()
 
     # Remove markdown-style triple backticks if present
     if extracted.startswith("```json"):
@@ -37,4 +44,3 @@ def extract_syllabus_with_llm(syllabus_text: str) -> dict:
         print("⚠️ Still failed to parse JSON:", e)
         print("Raw cleaned output:\n", extracted)
         return {}
-

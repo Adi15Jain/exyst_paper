@@ -31,11 +31,10 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
-    # --- LLM Providers ---
+    # --- LLM (Google AI Studio / Gemini) ---
     GEMINI_API_KEY: str = ""
-    GROQ_API_KEY: str = ""
     HF_TOKEN: str = ""
-    DEFAULT_LLM_MODEL: str = "gemini/gemini-2.5-flash"
+    DEFAULT_LLM_MODEL: str = "gemini-2.5-flash"
 
     # --- Database ---
     DATABASE_URL: str = "postgresql+asyncpg://exyst:exyst_password@localhost:5432/exyst_db"
