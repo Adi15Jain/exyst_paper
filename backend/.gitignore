@@ -40,3 +40,7 @@ htmlcov/
 
 # Alembic
 alembic/versions/*.pyc
+
+# Databases
+*.db
+*.sqlite

@@ -5,8 +5,10 @@ All configuration is loaded from environment variables (or .env file).
 This ensures no secrets are hardcoded and configuration is validated at startup.
 """
 
+import os
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,6 +39,13 @@ class Settings(BaseSettings):
     # --- Database ---
     DATABASE_URL: str = "postgresql+asyncpg://exyst:exyst_password@localhost:5432/exyst_db"
 
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def convert_postgres_scheme(cls, v: str) -> str:
+        if isinstance(v, str) and v.startswith("postgresql://"):
+            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
+
     # --- JWT Auth ---
     JWT_SECRET_KEY: str = "change-this-to-a-random-64-char-hex-string"
     JWT_ALGORITHM: str = "HS256"
@@ -47,8 +56,8 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # --- File Storage ---
-    UPLOAD_DIR: str = "uploads"
-    OUTPUTS_DIR: str = "outputs"
+    UPLOAD_DIR: str = "/tmp/uploads" if os.environ.get("VERCEL") else "uploads"
+    OUTPUTS_DIR: str = "/tmp/outputs" if os.environ.get("VERCEL") else "outputs"
     MAX_UPLOAD_SIZE_MB: int = 50
 
     @property
