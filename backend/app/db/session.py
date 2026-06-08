@@ -7,6 +7,7 @@ Provides:
 - Connection health check
 """
 
+import os
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import text
@@ -22,11 +23,13 @@ engine_kwargs: dict = {
     "echo": settings.DEBUG,
 }
 
-if settings.DEBUG:
+if settings.DEBUG or os.environ.get("VERCEL"):
     engine_kwargs["poolclass"] = NullPool
 else:
     engine_kwargs["pool_size"] = 5
     engine_kwargs["max_overflow"] = 10
+    engine_kwargs["pool_pre_ping"] = True
+    engine_kwargs["pool_recycle"] = 300
 
 engine = create_async_engine(settings.DATABASE_URL, **engine_kwargs)
 
