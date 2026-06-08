@@ -5,7 +5,20 @@
  * automatic refresh, and typed responses.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const getApiBase = (): string => {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (typeof window !== "undefined") {
+    // On Vercel (non-localhost), route API requests to the /_backend service route prefix
+    if (window.location.hostname !== "localhost" && !window.location.hostname.includes("127.0.0.1")) {
+      return "/_backend";
+    }
+  }
+  return "http://localhost:8000";
+};
+
+const API_BASE = getApiBase();
 const API_V1 = `${API_BASE}/api/v1`;
 
 // --- Token Management ---
