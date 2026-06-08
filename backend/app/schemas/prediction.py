@@ -84,6 +84,10 @@ class ConfidenceReport(BaseModel):
     question_quality_score: float = Field(
         description="Average quality of generated questions"
     )
+    marks_distribution_score: float = Field(
+        default=0.0,
+        description="How well marks distribution matches historical patterns"
+    )
     per_question_confidence: list[dict[str, Any]] = []
 
 

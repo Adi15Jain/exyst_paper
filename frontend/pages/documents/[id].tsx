@@ -758,6 +758,13 @@ export default function DocumentDetailPage() {
                                     }
                                     description="Well-formedness and completeness"
                                 />
+                                <ConfidenceBar
+                                    label="Marks Distribution"
+                                    value={
+                                        confidence.marks_distribution_score || 0
+                                    }
+                                    description="Alignment of marks pattern with historical papers"
+                                />
                             </div>
                         </div>
 

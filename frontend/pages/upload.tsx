@@ -1,29 +1,46 @@
 /**
- * Upload page — drag & drop upload, triggers analysis + prediction pipeline.
+ * Upload page — drag & drop upload, triggers analysis + prediction pipeline
+ * with real-time SSE streaming progress.
  */
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import Head from "next/head";
 import { useRouter } from "next/router";
 import AppLayout from "@/components/layout/AppLayout";
 import { useAuth } from "@/lib/auth-context";
-import { documents, analysis, predictions } from "@/lib/api";
+import {
+    documents,
+    pipeline,
+    PipelineEvent,
+} from "@/lib/api";
 
 type PipelineStage =
     | "idle"
     | "uploading"
-    | "analyzing"
-    | "predicting"
+    | "streaming"
     | "complete"
     | "error";
 
-const stageLabels: Record<PipelineStage, string> = {
-    idle: "Ready to upload",
-    uploading: "Uploading document...",
-    analyzing: "Running AI analysis pipeline...",
-    predicting: "Generating prediction...",
-    complete: "Complete!",
-    error: "An error occurred",
+interface StageLog {
+    stage: string;
+    detail: string;
+    progress: number;
+    timestamp: number;
+    duration?: number;
+}
+
+const STAGE_LABELS: Record<string, string> = {
+    starting: "🚀 Initializing pipeline",
+    analysis_start: "🔬 Starting AI analysis",
+    pdf_extraction: "📄 Extracting PDF text",
+    classifying: "🏷️ Classifying pages",
+    syllabus_analysis: "📚 Analyzing syllabus",
+    pattern_analysis: "📊 Analyzing question patterns",
+    rag_indexing: "🔗 Indexing into vector store",
+    analysis_complete: "✅ Analysis complete",
+    rag_retrieval: "🔍 Retrieving similar questions",
+    predicting: "🧠 Generating prediction (Gemini)",
+    evaluating: "📏 Scoring confidence",
 };
 
 export default function UploadPage() {
@@ -33,8 +50,12 @@ export default function UploadPage() {
     const [dragActive, setDragActive] = useState(false);
     const [stage, setStage] = useState<PipelineStage>("idle");
     const [error, setError] = useState("");
-    const [documentId, setDocumentId] = useState<string | null>(null);
     const [progress, setProgress] = useState(0);
+    const [currentDetail, setCurrentDetail] = useState("");
+    const [currentStage, setCurrentStage] = useState("");
+    const [stageLogs, setStageLogs] = useState<StageLog[]>([]);
+    const [completionData, setCompletionData] = useState<any>(null);
+    const startTimeRef = useRef<number>(0);
 
     const handleDrag = useCallback((e: React.DragEvent) => {
         e.preventDefault();
@@ -66,32 +87,80 @@ export default function UploadPage() {
 
         setError("");
         setProgress(0);
+        setStageLogs([]);
+        setCompletionData(null);
+        startTimeRef.current = Date.now();
 
         try {
             // Stage 1: Upload
             setStage("uploading");
-            setProgress(20);
+            setCurrentDetail("Uploading document...");
+            setCurrentStage("uploading");
+            setProgress(5);
+
             const doc = await documents.upload(file);
-            setDocumentId(doc.id);
 
-            // Stage 2: Analysis
-            setStage("analyzing");
-            setProgress(50);
-            await analysis.run(doc.id);
+            // Stage 2: Stream analysis + prediction
+            setStage("streaming");
+            setProgress(8);
 
-            // Stage 3: Prediction
-            setStage("predicting");
-            setProgress(80);
-            await predictions.generate(doc.id);
+            let lastStageTime = Date.now();
 
-            // Complete
-            setStage("complete");
-            setProgress(100);
+            await pipeline.runStream(doc.id, (event: PipelineEvent) => {
+                const now = Date.now();
 
-            // Navigate to results after a brief moment
-            setTimeout(() => {
-                router.push(`/documents/${doc.id}`);
-            }, 1500);
+                if (event.event === "stage") {
+                    const stageName = event.data.stage || "";
+                    const detail = event.data.detail || "";
+                    const prog = event.data.progress || 0;
+
+                    // Update current state
+                    setCurrentStage(stageName);
+                    setCurrentDetail(detail);
+                    setProgress(prog);
+
+                    // Add to log with duration of previous stage
+                    setStageLogs((prev) => {
+                        const updated = [...prev];
+                        if (updated.length > 0) {
+                            updated[updated.length - 1].duration =
+                                now - lastStageTime;
+                        }
+                        updated.push({
+                            stage: stageName,
+                            detail,
+                            progress: prog,
+                            timestamp: now,
+                        });
+                        return updated;
+                    });
+
+                    lastStageTime = now;
+                } else if (event.event === "complete") {
+                    setCompletionData(event.data);
+                    setStage("complete");
+                    setProgress(100);
+                    setCurrentDetail("Pipeline complete!");
+                    setCurrentStage("complete");
+
+                    // Navigate to results
+                    setTimeout(() => {
+                        router.push(`/documents/${doc.id}`);
+                    }, 2000);
+                } else if (event.event === "error") {
+                    setStage("error");
+                    setError(event.data.error || "Pipeline failed");
+                }
+            });
+
+            // If stream ended without complete event
+            if (stage !== "complete" && stage !== "error") {
+                setStage("complete");
+                setProgress(100);
+                setTimeout(() => {
+                    router.push(`/documents/${doc.id}`);
+                }, 2000);
+            }
         } catch (err) {
             setStage("error");
             setError(err instanceof Error ? err.message : "Pipeline failed");
@@ -103,9 +172,10 @@ export default function UploadPage() {
         return null;
     }
 
-    const isProcessing = ["uploading", "analyzing", "predicting"].includes(
-        stage,
-    );
+    const isProcessing = ["uploading", "streaming"].includes(stage);
+    const elapsed = startTimeRef.current
+        ? ((Date.now() - startTimeRef.current) / 1000).toFixed(1)
+        : "0";
 
     return (
         <>
@@ -268,26 +338,46 @@ export default function UploadPage() {
                         >
                             {isProcessing && <span className="spinner" />}
                             {isProcessing
-                                ? stageLabels[stage]
+                                ? currentDetail || "Processing..."
                                 : "🚀 Analyze & Predict"}
                         </button>
                     </div>
 
-                    {/* Progress Pipeline */}
+                    {/* Live Pipeline Progress */}
                     {stage !== "idle" && (
                         <div
                             className="glass-card animate-fade-in"
                             style={{ padding: 24 }}
                         >
-                            <h3
+                            <div
                                 style={{
-                                    fontSize: "0.95rem",
-                                    fontWeight: 700,
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
                                     marginBottom: 16,
                                 }}
                             >
-                                AI Pipeline Progress
-                            </h3>
+                                <h3
+                                    style={{
+                                        fontSize: "0.95rem",
+                                        fontWeight: 700,
+                                        margin: 0,
+                                    }}
+                                >
+                                    AI Pipeline Progress
+                                </h3>
+                                {isProcessing && (
+                                    <span
+                                        style={{
+                                            fontSize: "0.75rem",
+                                            color: "var(--text-muted)",
+                                            fontFamily: "monospace",
+                                        }}
+                                    >
+                                        {elapsed}s elapsed
+                                    </span>
+                                )}
+                            </div>
 
                             {/* Progress Bar */}
                             <div
@@ -296,7 +386,7 @@ export default function UploadPage() {
                                     height: 6,
                                     background: "rgba(255, 255, 255, 0.05)",
                                     borderRadius: 3,
-                                    marginBottom: 24,
+                                    marginBottom: 20,
                                     overflow: "hidden",
                                 }}
                             >
@@ -307,104 +397,177 @@ export default function UploadPage() {
                                         background:
                                             stage === "error"
                                                 ? "#ef4444"
-                                                : "var(--gradient-main)",
+                                                : stage === "complete"
+                                                  ? "var(--accent-emerald)"
+                                                  : "var(--gradient-main)",
                                         borderRadius: 3,
-                                        transition: "width 0.6s ease",
+                                        transition: "width 0.5s ease",
                                     }}
                                 />
                             </div>
 
-                            {/* Pipeline Steps */}
+                            {/* Current Stage */}
+                            {isProcessing && currentStage && (
+                                <div
+                                    style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: 10,
+                                        marginBottom: 16,
+                                        padding: "10px 14px",
+                                        borderRadius: "var(--radius-sm)",
+                                        background: "rgba(99, 102, 241, 0.06)",
+                                        border: "1px solid rgba(99, 102, 241, 0.15)",
+                                    }}
+                                >
+                                    <span
+                                        className="spinner"
+                                        style={{
+                                            width: 16,
+                                            height: 16,
+                                            borderWidth: 2,
+                                            flexShrink: 0,
+                                        }}
+                                    />
+                                    <span
+                                        style={{
+                                            fontSize: "0.85rem",
+                                            fontWeight: 600,
+                                            color: "var(--accent-indigo)",
+                                        }}
+                                    >
+                                        {STAGE_LABELS[currentStage] ||
+                                            currentStage}
+                                    </span>
+                                    <span
+                                        style={{
+                                            fontSize: "0.75rem",
+                                            color: "var(--text-muted)",
+                                            marginLeft: "auto",
+                                        }}
+                                    >
+                                        {progress}%
+                                    </span>
+                                </div>
+                            )}
+
+                            {/* Completion info */}
+                            {stage === "complete" && completionData && (
+                                <div
+                                    style={{
+                                        padding: "14px 16px",
+                                        borderRadius: "var(--radius-sm)",
+                                        background: "rgba(34, 197, 94, 0.06)",
+                                        border: "1px solid rgba(34, 197, 94, 0.2)",
+                                        marginBottom: 16,
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: 10,
+                                    }}
+                                >
+                                    <span style={{ fontSize: "1.2rem" }}>
+                                        ✅
+                                    </span>
+                                    <div>
+                                        <p
+                                            style={{
+                                                margin: 0,
+                                                fontWeight: 600,
+                                                fontSize: "0.9rem",
+                                                color: "var(--accent-emerald)",
+                                            }}
+                                        >
+                                            Pipeline Complete!
+                                        </p>
+                                        <p
+                                            style={{
+                                                margin: "4px 0 0",
+                                                fontSize: "0.8rem",
+                                                color: "var(--text-muted)",
+                                            }}
+                                        >
+                                            Confidence:{" "}
+                                            {(
+                                                (completionData.overall_confidence ||
+                                                    0) * 100
+                                            ).toFixed(0)}
+                                            % • Generated in{" "}
+                                            {completionData.generation_time_seconds?.toFixed(
+                                                1,
+                                            )}
+                                            s • Redirecting...
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Stage Timeline */}
                             <div
                                 style={{
                                     display: "flex",
                                     flexDirection: "column",
-                                    gap: 12,
+                                    gap: 6,
                                 }}
                             >
-                                <PipelineStep
-                                    label="Upload Document"
-                                    status={
-                                        stage === "uploading"
-                                            ? "active"
-                                            : progress >= 20
-                                              ? "complete"
-                                              : "pending"
-                                    }
-                                />
-                                <PipelineStep
-                                    label="AI Analysis (classify → extract → analyze)"
-                                    status={
-                                        stage === "analyzing"
-                                            ? "active"
-                                            : progress >= 50
-                                              ? "complete"
-                                              : "pending"
-                                    }
-                                />
-                                <PipelineStep
-                                    label="Generate Prediction & Score"
-                                    status={
-                                        stage === "predicting"
-                                            ? "active"
-                                            : progress >= 80
-                                              ? "complete"
-                                              : "pending"
-                                    }
-                                />
-                                <PipelineStep
-                                    label="Complete"
-                                    status={
-                                        stage === "complete"
-                                            ? "complete"
-                                            : "pending"
-                                    }
-                                />
+                                {stageLogs.map((log, i) => {
+                                    const isLast = i === stageLogs.length - 1;
+                                    const isCurrent = isLast && isProcessing;
+                                    return (
+                                        <div
+                                            key={i}
+                                            style={{
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: 10,
+                                                opacity: isCurrent ? 1 : 0.7,
+                                            }}
+                                        >
+                                            <span
+                                                style={{
+                                                    fontSize: "0.75rem",
+                                                    width: 16,
+                                                    textAlign: "center",
+                                                }}
+                                            >
+                                                {isCurrent ? "🔄" : "✅"}
+                                            </span>
+                                            <span
+                                                style={{
+                                                    flex: 1,
+                                                    fontSize: "0.8rem",
+                                                    color: isCurrent
+                                                        ? "var(--text-primary)"
+                                                        : "var(--text-muted)",
+                                                    fontWeight: isCurrent
+                                                        ? 600
+                                                        : 400,
+                                                }}
+                                            >
+                                                {STAGE_LABELS[log.stage] ||
+                                                    log.detail}
+                                            </span>
+                                            {log.duration !== undefined && (
+                                                <span
+                                                    style={{
+                                                        fontSize: "0.7rem",
+                                                        color: "var(--text-muted)",
+                                                        fontFamily: "monospace",
+                                                    }}
+                                                >
+                                                    {(
+                                                        log.duration / 1000
+                                                    ).toFixed(1)}
+                                                    s
+                                                </span>
+                                            )}
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
                     )}
                 </div>
             </AppLayout>
         </>
-    );
-}
-
-function PipelineStep({
-    label,
-    status,
-}: {
-    label: string;
-    status: "pending" | "active" | "complete";
-}) {
-    const icons = {
-        pending: "⬜",
-        active: "🔄",
-        complete: "✅",
-    };
-    const colors = {
-        pending: "var(--text-muted)",
-        active: "var(--accent-indigo)",
-        complete: "var(--accent-emerald)",
-    };
-
-    return (
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontSize: "1rem" }}>{icons[status]}</span>
-            <span
-                style={{
-                    color: colors[status],
-                    fontSize: "0.85rem",
-                    fontWeight: status === "active" ? 600 : 400,
-                }}
-            >
-                {label}
-            </span>
-            {status === "active" && (
-                <span
-                    className="spinner"
-                    style={{ width: 14, height: 14, borderWidth: 2 }}
-                />
-            )}
-        </div>
     );
 }

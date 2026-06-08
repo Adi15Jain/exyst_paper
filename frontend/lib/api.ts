@@ -315,3 +315,87 @@ export const analytics = {
 export const health = {
     check: () => apiFetch<any>("/health"),
 };
+
+// --- Pipeline Streaming API (SSE) ---
+
+export interface PipelineEvent {
+    event: "stage" | "complete" | "error";
+    data: {
+        stage?: string;
+        progress?: number;
+        detail?: string;
+        document_id?: string;
+        prediction_id?: string;
+        overall_confidence?: number;
+        generation_time_seconds?: number;
+        error?: string;
+    };
+}
+
+export const pipeline = {
+    /**
+     * Run the full analysis + prediction pipeline with SSE streaming progress.
+     * Calls onEvent for each SSE event received.
+     * Returns a promise that resolves when the stream completes.
+     */
+    runStream: async (
+        documentId: string,
+        onEvent: (event: PipelineEvent) => void,
+    ): Promise<void> => {
+        const headers: Record<string, string> = {};
+        if (accessToken) {
+            headers["Authorization"] = `Bearer ${accessToken}`;
+        }
+
+        const response = await fetch(
+            `${API_V1}/pipeline/${documentId}/run-stream`,
+            {
+                method: "POST",
+                headers,
+            },
+        );
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({
+                message: `Pipeline failed with status ${response.status}`,
+            }));
+            throw new Error(
+                error.message || error.detail || `Pipeline error: ${response.status}`,
+            );
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error("No response body");
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+
+            // Parse SSE events from buffer
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+            let currentEvent = "";
+            for (const line of lines) {
+                if (line.startsWith("event: ")) {
+                    currentEvent = line.slice(7).trim();
+                } else if (line.startsWith("data: ")) {
+                    try {
+                        const data = JSON.parse(line.slice(6));
+                        onEvent({
+                            event: currentEvent as PipelineEvent["event"],
+                            data,
+                        });
+                    } catch {
+                        // Skip malformed JSON
+                    }
+                }
+            }
+        }
+    },
+};
