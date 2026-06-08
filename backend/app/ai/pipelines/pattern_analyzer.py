@@ -8,7 +8,7 @@ and LLM for semantic topic matching.
 """
 
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.ai.llm_client import LLMClient
 from app.core.logging import get_logger
@@ -41,7 +41,7 @@ class PatternAnalyzer:
     def __init__(self, llm_client: LLMClient | None = None):
         self.llm = llm_client or LLMClient()
 
-    async def extract_topics_from_paper(self, paper_text: str) -> List[Dict[str, Any]]:
+    async def extract_topics_from_paper(self, paper_text: str) -> list[dict[str, Any]]:
         """
         Extract topics from a single question paper using LLM.
 
@@ -58,7 +58,10 @@ class PatternAnalyzer:
         try:
             result = await self.llm.complete_json(
                 prompt=prompt,
-                system_prompt="You are an academic content analyzer. Extract question topics precisely. Return valid JSON only.",
+                system_prompt=(
+                    "You are an academic content analyzer. "
+                    "Extract question topics precisely. Return valid JSON only."
+                ),
                 temperature=0.1,
             )
             return result.get("questions", [])
@@ -68,8 +71,8 @@ class PatternAnalyzer:
 
     async def analyze_frequency(
         self,
-        papers: List[Dict[str, str]],
-    ) -> Dict[str, Any]:
+        papers: list[dict[str, str]],
+    ) -> dict[str, Any]:
         """
         Analyze topic frequency across multiple papers.
 
@@ -79,9 +82,9 @@ class PatternAnalyzer:
         Returns:
             Dict with frequency data, trends, and patterns.
         """
-        all_topics: List[str] = []
-        topic_by_session: Dict[str, List[str]] = defaultdict(list)
-        questions_by_paper: List[List[Dict]] = []
+        all_topics: list[str] = []
+        topic_by_session: dict[str, list[str]] = defaultdict(list)
+        questions_by_paper: list[list[dict]] = []
 
         for paper in papers:
             session = paper.get("session", "Unknown")
@@ -98,7 +101,7 @@ class PatternAnalyzer:
         topic_counts = Counter(all_topics)
         total_questions = len(all_topics)
 
-        frequency_data = []
+        frequency_data: list[dict[str, Any]] = []
         for topic, count in topic_counts.most_common():
             frequency_data.append({
                 "topic": topic,
@@ -115,7 +118,10 @@ class PatternAnalyzer:
             "top_5_topics": [t["topic"] for t in frequency_data[:5]],
             "rising_topics": [t["topic"] for t in frequency_data if t["trend"] == "rising"],
             "falling_topics": [t["topic"] for t in frequency_data if t["trend"] == "falling"],
-            "consistent_topics": [t["topic"] for t in frequency_data if t["trend"] == "stable" and t["count"] >= 2],
+            "consistent_topics": [
+                t["topic"] for t in frequency_data
+                if t["trend"] == "stable" and t["count"] >= 2
+            ],
         }
 
         logger.info(
@@ -135,7 +141,7 @@ class PatternAnalyzer:
     def _calculate_trend(
         self,
         topic: str,
-        topic_by_session: Dict[str, List[str]],
+        topic_by_session: dict[str, list[str]],
     ) -> str:
         """
         Determine if a topic is rising, falling, or stable.

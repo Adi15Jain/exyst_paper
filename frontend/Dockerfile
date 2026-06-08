@@ -9,10 +9,8 @@ RUN npm ci
 # Copy application code
 COPY . .
 
-# Build
-RUN npm run build
-
 # Expose port
 EXPOSE 3000
 
-CMD ["npm", "start"]
+# Default command (overridden in docker-compose for dev)
+CMD ["npm", "run", "dev"]

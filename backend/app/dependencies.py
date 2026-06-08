@@ -4,13 +4,11 @@ FastAPI dependencies — authentication, database session, etc.
 
 from uuid import UUID
 
-from fastapi import Depends, Header
+from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AuthenticationError, InvalidTokenError
 from app.core.security import verify_access_token
-from app.db.session import get_db
 
 security_scheme = HTTPBearer(auto_error=False)
 

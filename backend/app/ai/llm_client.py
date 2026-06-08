@@ -10,7 +10,7 @@ All LLM calls in the application go through this client, which provides:
 
 import json
 import time
-from typing import Any, Dict, Optional, Type
+from typing import Any, TypeVar
 
 from litellm import acompletion
 from pydantic import BaseModel
@@ -22,6 +22,9 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+T = TypeVar("T", bound=BaseModel)
+
+
 class LLMResponse:
     """Wrapper around an LLM response with metadata."""
 
@@ -29,7 +32,7 @@ class LLMResponse:
         self,
         content: str,
         model: str,
-        usage: Optional[Dict[str, int]] = None,
+        usage: dict[str, int] | None = None,
         latency_ms: float = 0,
     ):
         self.content = content
@@ -37,7 +40,7 @@ class LLMResponse:
         self.usage = usage or {}
         self.latency_ms = latency_ms
 
-    def parse_json(self) -> Dict[str, Any]:
+    def parse_json(self) -> dict[str, Any]:
         """Parse content as JSON, cleaning markdown fences if present."""
         cleaned = self.content.strip()
 
@@ -59,7 +62,7 @@ class LLMResponse:
                 raw_output=cleaned,
             )
 
-    def parse_as(self, model_class: Type[BaseModel]) -> BaseModel:
+    def parse_as(self, model_class: type[T]) -> T:
         """Parse content into a Pydantic model."""
         data = self.parse_json()
         try:
@@ -83,7 +86,7 @@ class LLMClient:
 
     def __init__(
         self,
-        model: Optional[str] = None,
+        model: str | None = None,
         max_retries: int = 3,
         retry_delay: float = 1.0,
     ):
@@ -95,10 +98,10 @@ class LLMClient:
     async def complete(
         self,
         prompt: str,
-        system_prompt: Optional[str] = None,
+        system_prompt: str | None = None,
         temperature: float = 0.2,
-        max_tokens: Optional[int] = None,
-        response_format: Optional[Dict[str, Any]] = None,
+        max_tokens: int | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> LLMResponse:
         """
         Send a completion request to the LLM with retry logic.
@@ -124,7 +127,7 @@ class LLMClient:
             try:
                 start_time = time.perf_counter()
 
-                kwargs: Dict[str, Any] = {
+                kwargs: dict[str, Any] = {
                     "model": self.model,
                     "messages": messages,
                     "temperature": temperature,
@@ -181,9 +184,9 @@ class LLMClient:
     async def complete_json(
         self,
         prompt: str,
-        system_prompt: Optional[str] = None,
+        system_prompt: str | None = None,
         temperature: float = 0.2,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Convenience method: complete and parse as JSON.
 
@@ -200,8 +203,8 @@ class LLMClient:
     async def complete_structured(
         self,
         prompt: str,
-        output_model: Type[BaseModel],
-        system_prompt: Optional[str] = None,
+        output_model: type[BaseModel],
+        system_prompt: str | None = None,
         temperature: float = 0.2,
     ) -> BaseModel:
         """

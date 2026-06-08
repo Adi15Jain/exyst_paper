@@ -8,7 +8,7 @@ Stores historical question paper content as vector embeddings, enabling:
 """
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
@@ -55,7 +55,7 @@ class RAGPipeline:
 
     def index_questions(
         self,
-        questions: List[Dict[str, Any]],
+        questions: list[dict[str, Any]],
         document_id: str,
         session: str = "unknown",
     ) -> int:
@@ -74,7 +74,7 @@ class RAGPipeline:
             return 0
 
         documents = []
-        metadatas = []
+        metadatas: list[chromadb.Metadata] = []
         ids = []
 
         for i, q in enumerate(questions):
@@ -120,7 +120,7 @@ class RAGPipeline:
 
     def index_topics(
         self,
-        topics: List[str],
+        topics: list[str],
         document_id: str,
         unit: str = "unknown",
     ) -> int:
@@ -139,7 +139,7 @@ class RAGPipeline:
             return 0
 
         documents = []
-        metadatas = []
+        metadatas: list[chromadb.Metadata] = []
         ids = []
 
         for i, topic in enumerate(topics):
@@ -177,8 +177,8 @@ class RAGPipeline:
         self,
         query: str,
         n_results: int = 10,
-        topic_filter: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        topic_filter: str | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Retrieve similar historical questions using semantic search.
 
@@ -191,7 +191,7 @@ class RAGPipeline:
             List of similar question dicts with scores.
         """
         try:
-            where_filter = None
+            where_filter: dict[str, Any] | None = None
             if topic_filter:
                 where_filter = {"topic": {"$eq": topic_filter}}
 
@@ -212,7 +212,8 @@ class RAGPipeline:
                         "topic": metadata.get("topic", ""),
                         "session": metadata.get("session", ""),
                         "marks": metadata.get("marks", ""),
-                        "similarity_score": round(1 - distance, 3),  # Convert distance to similarity
+                        # Convert distance to similarity
+                        "similarity_score": round(1 - distance, 3),
                     })
 
             logger.info(
@@ -231,7 +232,7 @@ class RAGPipeline:
         self,
         query: str,
         n_results: int = 5,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Find semantically related syllabus topics.
 
@@ -266,7 +267,7 @@ class RAGPipeline:
             logger.warning("topic_retrieval_failed", error=str(e))
             return []
 
-    def get_collection_stats(self) -> Dict[str, Any]:
+    def get_collection_stats(self) -> dict[str, Any]:
         """Get statistics about the vector store."""
         return {
             "total_questions": self.questions_collection.count(),

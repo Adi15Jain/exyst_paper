@@ -2,7 +2,7 @@
 Health check endpoint.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 
@@ -11,7 +11,7 @@ from app.db.session import check_db_connection
 
 router = APIRouter(tags=["Health"])
 
-_start_time = datetime.now(timezone.utc)
+_start_time = datetime.now(UTC)
 
 
 @router.get("/health")
@@ -23,7 +23,7 @@ async def health_check():
     """
     settings = get_settings()
     db_healthy = await check_db_connection()
-    uptime = (datetime.now(timezone.utc) - _start_time).total_seconds()
+    uptime = (datetime.now(UTC) - _start_time).total_seconds()
 
     return {
         "status": "healthy" if db_healthy else "degraded",
@@ -34,5 +34,5 @@ async def health_check():
             "llm_provider": "configured" if settings.GROQ_API_KEY else "not_configured",
         },
         "uptime_seconds": round(uptime, 1),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }

@@ -7,9 +7,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.dependencies import get_current_user_id
-from app.core.exceptions import NotFoundError
 from app.services.prediction_service import PredictionService
 
 router = APIRouter(prefix="/predictions", tags=["Predictions"])

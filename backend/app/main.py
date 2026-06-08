@@ -6,6 +6,7 @@ All business logic lives in the service and AI layers.
 """
 
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +15,22 @@ from app.api.router import api_router
 from app.config import get_settings
 from app.core.logging import setup_logging
 from app.core.middleware import register_middleware
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan — startup and shutdown events."""
+    # --- Startup ---
+    from app.db.session import engine
+    from app.models import Base
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    yield
+
+    # --- Shutdown ---
+    await engine.dispose()
 
 
 def create_app() -> FastAPI:
@@ -27,9 +44,13 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.APP_NAME,
         version=settings.APP_VERSION,
-        description="AI-Powered Exam Intelligence Platform — analyzes syllabi and past papers to predict future exam questions.",
+        description=(
+            "AI-Powered Exam Intelligence Platform — "
+            "analyzes syllabi and past papers to predict future exam questions."
+        ),
         docs_url="/docs",
         redoc_url="/redoc",
+        lifespan=lifespan,
     )
 
     # CORS

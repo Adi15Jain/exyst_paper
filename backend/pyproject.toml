@@ -28,7 +28,7 @@ dependencies = [
 
     # --- Auth & Security ---
     "PyJWT>=2.8.0",
-    "passlib[bcrypt]>=1.7.4",
+    "bcrypt>=4.0.0",
     "python-dotenv>=1.0.0",
 
     # --- Configuration ---
@@ -75,3 +75,8 @@ testpaths = ["tests"]
 python_version = "3.11"
 ignore_missing_imports = true
 strict = false
+
+[tool.pyrefly]
+python_interpreter = "venv/bin/python"
+python-interpreter-path = "venv/bin/python"
+search_path = ["."]

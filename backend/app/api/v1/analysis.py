@@ -7,9 +7,9 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.dependencies import get_current_user_id
-from app.core.exceptions import NotFoundError
 from app.schemas.analysis import AnalysisResponse, AnalysisStatusResponse
 from app.services.analysis_service import AnalysisService
 

@@ -5,11 +5,9 @@ Document service — handles file upload, storage, and retrieval.
 import hashlib
 import os
 import time
-from pathlib import Path
-from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings

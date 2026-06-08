@@ -7,11 +7,11 @@ Provides multi-factor confidence scoring:
 - Historical alignment: do predictions match historical patterns
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
 from app.ai.pipelines.syllabus_analyzer import SyllabusStructure
-from app.schemas.prediction import ConfidenceReport, PredictedPaper
 from app.core.logging import get_logger
+from app.schemas.prediction import ConfidenceReport, PredictedPaper
 
 logger = get_logger(__name__)
 
@@ -25,7 +25,7 @@ class Evaluator:
         self,
         paper: PredictedPaper,
         syllabus: SyllabusStructure,
-        frequency_data: Dict[str, Any],
+        frequency_data: dict[str, Any],
     ) -> ConfidenceReport:
         """
         Compute a multi-factor confidence report for a predicted paper.
@@ -157,7 +157,7 @@ class Evaluator:
     def _score_historical_alignment(
         self,
         paper: PredictedPaper,
-        frequency_data: Dict[str, Any],
+        frequency_data: dict[str, Any],
     ) -> float:
         """
         Score how well predictions align with historical patterns.

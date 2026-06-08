@@ -2,6 +2,11 @@
 Pydantic schemas for request/response validation.
 """
 
+from .analysis import (
+    AnalysisResponse,
+    AnalysisStatusResponse,
+    TopicFrequency,
+)
 from .auth import (
     LoginRequest,
     RegisterRequest,
@@ -9,20 +14,15 @@ from .auth import (
     UserResponse,
 )
 from .document import (
-    DocumentResponse,
     DocumentListResponse,
+    DocumentResponse,
     DocumentUploadResponse,
 )
-from .analysis import (
-    AnalysisResponse,
-    AnalysisStatusResponse,
-    TopicFrequency,
-)
 from .prediction import (
-    PredictionResponse,
-    PredictedQuestion,
-    PredictedPaper,
     ConfidenceReport,
+    PredictedPaper,
+    PredictedQuestion,
+    PredictionResponse,
 )
 
 __all__ = [

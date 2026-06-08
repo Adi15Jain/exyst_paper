@@ -2,7 +2,6 @@
 Syllabus analyzer — extracts structured topic/unit information from syllabus text.
 """
 
-from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -39,20 +38,20 @@ class SyllabusUnit(BaseModel):
     """A single unit/module in the syllabus."""
     unit_number: int = 0
     title: str = ""
-    topics: List[str] = []
+    topics: list[str] = []
 
 
 class SyllabusStructure(BaseModel):
     """Structured representation of a syllabus."""
     course_title: str = ""
-    course_code: Optional[str] = None
+    course_code: str | None = None
     total_units: int = 0
-    units: List[SyllabusUnit] = []
-    textbooks: List[str] = []
-    course_outcomes: List[str] = []
+    units: list[SyllabusUnit] = []
+    textbooks: list[str] = []
+    course_outcomes: list[str] = []
 
     @property
-    def all_topics(self) -> List[str]:
+    def all_topics(self) -> list[str]:
         """Flat list of all topics across all units."""
         topics = []
         for unit in self.units:

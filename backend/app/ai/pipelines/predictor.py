@@ -9,12 +9,12 @@ Multi-step process:
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.ai.llm_client import LLMClient
 from app.ai.pipelines.syllabus_analyzer import SyllabusStructure
-from app.schemas.prediction import PredictedPaper, PredictedQuestion, PredictedSection
 from app.core.logging import get_logger
+from app.schemas.prediction import PredictedPaper, PredictedSection
 
 logger = get_logger(__name__)
 
@@ -106,9 +106,9 @@ class Predictor:
     async def predict(
         self,
         syllabus: SyllabusStructure,
-        frequency_data: Dict[str, Any],
-        metadata: Dict[str, Optional[str]],
-        sample_questions: List[Dict[str, Any]] | None = None,
+        frequency_data: dict[str, Any],
+        metadata: dict[str, str | None],
+        sample_questions: list[dict[str, Any]] | None = None,
     ) -> PredictedPaper:
         """
         Generate a predicted question paper.
@@ -134,15 +134,25 @@ class Predictor:
         # Format sample questions
         sample_q_text = self._format_sample_questions(sample_questions or [])
 
+        course_title = syllabus.course_title or metadata.get("subject", "Unknown Subject")
+        rising = ", ".join(patterns.get("rising_topics", [])) or "None detected"
+        falling = ", ".join(patterns.get("falling_topics", [])) or "None detected"
+        consistent = ", ".join(patterns.get("consistent_topics", [])) or "None detected"
+        num_papers = patterns.get("total_papers_analyzed", 0)
+
+        total_q = patterns.get("total_questions_found", 10)
+        total_p = max(patterns.get("total_papers_analyzed", 1), 1)
+        typical_q = total_q // total_p
+
         prompt = PREDICTOR_USER_PROMPT.format(
-            course_title=syllabus.course_title or metadata.get("subject", "Unknown Subject"),
+            course_title=course_title,
             topics_by_unit=topics_by_unit,
             frequency_summary=frequency_summary,
-            rising_topics=", ".join(patterns.get("rising_topics", [])) or "None detected",
-            falling_topics=", ".join(patterns.get("falling_topics", [])) or "None detected",
-            consistent_topics=", ".join(patterns.get("consistent_topics", [])) or "None detected",
-            num_papers=patterns.get("total_papers_analyzed", 0),
-            typical_num_questions=patterns.get("total_questions_found", 10) // max(patterns.get("total_papers_analyzed", 1), 1),
+            rising_topics=rising,
+            falling_topics=falling,
+            consistent_topics=consistent,
+            num_papers=num_papers,
+            typical_num_questions=typical_q,
             max_marks=metadata.get("max_marks", "100"),
             duration=metadata.get("duration", "3 Hours"),
             next_year=next_year,
@@ -185,7 +195,7 @@ class Predictor:
             lines.append(f"Unit {unit.unit_number} ({unit.title}): {topics}")
         return "\n".join(lines)
 
-    def _format_frequency(self, frequency_data: Dict[str, Any]) -> str:
+    def _format_frequency(self, frequency_data: dict[str, Any]) -> str:
         """Format frequency data for prompt context."""
         freq_list = frequency_data.get("frequency", [])
         if not freq_list:
@@ -199,14 +209,15 @@ class Predictor:
             )
         return "\n".join(lines)
 
-    def _format_sample_questions(self, questions: List[Dict[str, Any]]) -> str:
+    def _format_sample_questions(self, questions: list[dict[str, Any]]) -> str:
         """Format sample questions for prompt context."""
         if not questions:
             return "No sample questions available."
 
         lines = []
         for q in questions[:10]:  # Max 10 samples
-            text = q.get("question_text", q.get("text", ""))[:200]
+            val = q.get("question_text") or q.get("text") or ""
+            text = val[:200]
             topic = q.get("topic", "Unknown")
             marks = q.get("marks", "?")
             lines.append(f"- [{topic}] ({marks} marks) {text}")
@@ -215,7 +226,7 @@ class Predictor:
     def _create_fallback_paper(
         self,
         syllabus: SyllabusStructure,
-        metadata: Dict[str, Optional[str]],
+        metadata: dict[str, str | None],
     ) -> PredictedPaper:
         """Create a minimal valid paper when LLM fails."""
         current_year = datetime.now().year

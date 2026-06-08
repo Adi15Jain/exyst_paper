@@ -6,7 +6,7 @@
 
 - **Framework**: Next.js 15 (Pages Router)
 - **Language**: TypeScript
-- **Styling**: TailwindCSS v4 + custom CSS design system
+- **Styling**: TailwindCSS v4 + Custom premium CSS design system
 - **State**: React Context (Auth)
 - **HTTP**: Custom typed API client with JWT auto-refresh
 
@@ -14,7 +14,7 @@
 
 | Route             | Description                                       |
 | ----------------- | ------------------------------------------------- |
-| `/`               | Landing page — hero section, features, CTA        |
+| `/`               | Landing page — premium hero section, features, CTA|
 | `/login`          | Login / Register — glassmorphism card, validation |
 | `/dashboard`      | Overview — stat cards, quick actions, recent docs |
 | `/upload`         | Upload — drag & drop, pipeline progress stages    |
@@ -62,24 +62,21 @@ frontend/
 │   └── prediction.ts           # Shared TypeScript interfaces
 │
 ├── styles/
-│   └── globals.css             # Design system
-│                               #   - CSS variables (colors, gradients)
-│                               #   - Glassmorphism utilities
-│                               #   - Animation keyframes
-│                               #   - Component styles (buttons, badges, cards)
+│   └── globals.css             # Premium design system styling (colors, glassmorphism, animations)
 │
 ├── package.json
 ├── tsconfig.json
 ├── next.config.ts
 ├── postcss.config.mjs
-└── Dockerfile
+├── .dockerignore               # Optimizes Docker builds by ignoring local node_modules/.next
+└── Dockerfile                  # Production-ready Docker container configuration
 ```
 
 ## Design System
 
 The design system in `styles/globals.css` provides:
 
-- **CSS Variables** — dark mode palette, accent colors, gradients, borders, shadows
+- **CSS Variables** — custom dark mode palette, accent colors, gradients, borders, shadows
 - **Glassmorphism** — `.glass`, `.glass-card` (backdrop-blur + subtle borders)
 - **Gradient Text** — `.text-gradient`, `.text-gradient-accent`
 - **Buttons** — `.btn-primary` (gradient), `.btn-secondary` (outline)
@@ -90,69 +87,41 @@ The design system in `styles/globals.css` provides:
 - **Stagger** — `.stagger-1` through `.stagger-5` for cascade effects
 - **Charts** — `.bar-chart-bar`, `.confidence-ring` for data visualization
 
-## API Client (`lib/api.ts`)
-
-Centralized HTTP client that handles:
-
-- **Token Management** — stores JWT access + refresh tokens in localStorage
-- **Auto-Refresh** — on 401, transparently refreshes and retries the request
-- **Typed Responses** — all endpoints return typed TypeScript interfaces
-- **FormData** — handles file uploads with correct Content-Type
-
-```typescript
-import { auth, documents, analysis, predictions, analytics } from "@/lib/api";
-
-// Auth
-await auth.login("user@example.com", "password");
-const user = await auth.me();
-
-// Upload & analyze
-const doc = await documents.upload(file);
-await analysis.run(doc.id);
-const prediction = await predictions.generate(doc.id);
-
-// Analytics
-const stats = await analytics.overview();
-const topics = await analytics.topicFrequency(doc.id);
-```
-
 ## Getting Started
 
-### With the full stack (recommended)
+### Standalone Development (Recommended)
 
+1. **Install Dependencies**:
+   ```bash
+   # From the frontend directory
+   npm install
+   ```
+
+2. **Run Dev Server**:
+   ```bash
+   npm run dev
+   ```
+   The application will be available at http://localhost:3000.
+
+3. **Build & Lint**:
+   ```bash
+   # Production build
+   npm run build
+
+   # Code linting
+   npm run lint
+   ```
+
+### Containerized Execution
+
+To run the frontend together with the backend under Docker Compose:
 ```bash
 # From the project root
 docker compose up --build
-# Frontend at http://localhost:3000
 ```
 
-### Standalone development
-
-```bash
-# Install dependencies
-npm install
-
-# Run dev server
-npm run dev
-
-# Build for production
-npm run build
-
-# Lint
-npm run lint
-```
-
-### Environment Variables
+## Environment Variables
 
 | Variable              | Default                 | Description          |
 | --------------------- | ----------------------- | -------------------- |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Backend API base URL |
-
-## Dependencies
-
-| Package       | Version | Purpose         |
-| ------------- | ------- | --------------- |
-| `next`        | 15.4    | React framework |
-| `react`       | 19.1    | UI library      |
-| `typescript`  | ^5      | Type safety     |
-| `tailwindcss` | ^4      | Utility CSS     |

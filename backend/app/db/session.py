@@ -7,24 +7,28 @@ Provides:
 - Connection health check
 """
 
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
-from sqlalchemy import text
 
 from app.config import get_settings
 
 settings = get_settings()
 
 # Create async engine
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=settings.DEBUG,
-    poolclass=NullPool if settings.DEBUG else None,
-    pool_size=5 if not settings.DEBUG else None,
-    max_overflow=10 if not settings.DEBUG else None,
-)
+engine_kwargs: dict = {
+    "echo": settings.DEBUG,
+}
+
+if settings.DEBUG:
+    engine_kwargs["poolclass"] = NullPool
+else:
+    engine_kwargs["pool_size"] = 5
+    engine_kwargs["max_overflow"] = 10
+
+engine = create_async_engine(settings.DATABASE_URL, **engine_kwargs)
 
 # Session factory
 async_session_factory = async_sessionmaker(

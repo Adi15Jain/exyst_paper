@@ -4,32 +4,33 @@ JWT authentication utilities.
 Handles token creation, validation, and password hashing.
 """
 
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
+import bcrypt
 import jwt
-from passlib.context import CryptContext
 
 from app.config import get_settings
 from app.core.exceptions import InvalidTokenError
 
-# Password hashing context (bcrypt)
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 def hash_password(password: str) -> str:
-    """Hash a plaintext password."""
-    return pwd_context.hash(password)
+    """Hash a plaintext password using bcrypt."""
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a plaintext password against a hash."""
-    return pwd_context.verify(plain_password, hashed_password)
+    """Verify a plaintext password against a bcrypt hash."""
+    return bcrypt.checkpw(
+        plain_password.encode("utf-8"),
+        hashed_password.encode("utf-8"),
+    )
 
 
 def create_access_token(
     subject: str,
-    extra_claims: Optional[Dict[str, Any]] = None,
+    extra_claims: dict[str, Any] | None = None,
 ) -> str:
     """
     Create a short-lived JWT access token.
@@ -39,7 +40,7 @@ def create_access_token(
         extra_claims: Additional claims to include in the token.
     """
     settings = get_settings()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
     payload = {
@@ -61,7 +62,7 @@ def create_refresh_token(subject: str) -> str:
         subject: The user ID (stored as 'sub' claim).
     """
     settings = get_settings()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expire = now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
     payload = {
@@ -74,7 +75,7 @@ def create_refresh_token(subject: str) -> str:
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
-def decode_token(token: str) -> Dict[str, Any]:
+def decode_token(token: str) -> dict[str, Any]:
     """
     Decode and validate a JWT token.
 

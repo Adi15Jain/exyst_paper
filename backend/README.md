@@ -7,10 +7,10 @@
 - **Framework**: FastAPI 0.115+
 - **Language**: Python 3.11+
 - **ORM**: SQLAlchemy 2.0 (async)
-- **Database**: PostgreSQL 16
+- **Database**: Neon PostgreSQL (Serverless Cloud)
 - **Migrations**: Alembic
 - **AI/LLM**: LiteLLM (Groq), ChromaDB (RAG)
-- **Auth**: JWT (PyJWT + bcrypt)
+- **Auth**: JWT (PyJWT) + Direct bcrypt hashing (Python 3.14 compatible)
 - **Logging**: structlog (JSON)
 - **Testing**: pytest + pytest-asyncio
 
@@ -18,7 +18,7 @@
 
 ```
 app/
-├── main.py              # Entry point (~50 lines)
+├── main.py              # Entry point (~80 lines, includes lifespan logic)
 ├── config.py            # Pydantic Settings
 ├── dependencies.py      # FastAPI dependency injection
 │
@@ -60,7 +60,7 @@ app/
 │   ├── exceptions.py    # Custom exception hierarchy
 │   ├── logging.py       # structlog configuration
 │   ├── middleware.py     # Request ID, timing, error handler
-│   └── security.py      # JWT encode/decode utilities
+│   └── security.py      # JWT encode/decode and direct bcrypt hashing utilities
 │
 └── db/
     └── session.py       # Async SQLAlchemy session factory
@@ -117,87 +117,84 @@ app/
 
 ## Getting Started
 
-### With Docker (recommended)
+### Local Development (Recommended)
+
+1. **Activate the Virtual Environment**:
+
+    ```bash
+    # From the backend directory
+    python -m venv venv && source venv/bin/activate
+    ```
+
+2. **Install Dependencies**:
+
+    ```bash
+    pip install -e ".[dev]"
+    ```
+
+3. **Configure the Environment**:
+   Create a `.env` file based on `.env.example`:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+4. **Run the Dev Server**:
+
+    ```bash
+    uvicorn app.main:app --reload
+    ```
+
+    _Note: Tables are automatically created/migrated in the Neon PostgreSQL database on application startup via the lifespan handler._
+
+5. **Access API Documentation**:
+    - Swagger UI: http://localhost:8000/docs
+    - ReDoc: http://localhost:8000/redoc
+
+### With Docker
+
+You can also run the backend containerized:
 
 ```bash
 # From the project root
 docker compose up --build
-# API at http://localhost:8000
-# Docs at http://localhost:8000/docs
 ```
 
-### Local development
+## Environment Variables
+
+Configure these in `backend/.env`:
+
+| Variable         | Required | Description                       |
+| ---------------- | -------- | --------------------------------- |
+| `GROQ_API_KEY`   | ✅       | Groq API key for LLM calls        |
+| `DATABASE_URL`   | ✅       | Neon PostgreSQL connection string |
+| `JWT_SECRET_KEY` | ✅       | Random 64-char hex string         |
+| `DEBUG`          |          | Enable debug mode                 |
+
+## Testing & Linting
 
 ```bash
-# Create virtual environment
-python -m venv venv && source venv/bin/activate
-
-# Install with dev dependencies
-pip install -e ".[dev]"
-
-# Run dev server
-uvicorn app.main:app --reload
-
-# Open API docs
-open http://localhost:8000/docs
-```
-
-### Environment Variables
-
-Copy `.env.example` to `.env` and configure:
-
-```bash
-cp .env.example .env
-```
-
-| Variable         | Required | Description                  |
-| ---------------- | -------- | ---------------------------- |
-| `GROQ_API_KEY`   | ✅       | Groq API key for LLM calls   |
-| `DATABASE_URL`   | ✅       | PostgreSQL connection string |
-| `JWT_SECRET_KEY` | ✅       | Random 64-char hex string    |
-| `HF_TOKEN`       |          | HuggingFace token (optional) |
-| `REDIS_URL`      |          | Redis URL (default: local)   |
-| `DEBUG`          |          | Enable debug mode            |
-
-## Testing
-
-```bash
-# Run all 16 tests
+# Run all tests
 pytest tests/ -v
 
-# With coverage
+# Run with coverage report
 pytest tests/ -v --cov=app --cov-report=term-missing
 
-# Just API tests
-pytest tests/test_api/ -v
-
-# Just AI tests
-pytest tests/test_ai/ -v
-
-# Lint
+# Lint & Type Check
 ruff check app/
-
-# Type check
 mypy app/ --ignore-missing-imports
 ```
 
-### Test Suites
+## IDE / Type Checker Setup (Pyrefly)
 
-| Suite                    | Tests | What it covers                             |
-| ------------------------ | ----- | ------------------------------------------ |
-| `test_api/test_health`   | 2     | Health endpoint, OpenAPI docs availability |
-| `test_ai/test_pipelines` | 8     | PDF metadata extraction, evaluator scoring |
-| `test_ai/test_rag`       | 6     | ChromaDB indexing, retrieval, idempotency  |
+If you are using the **Pyrefly** type checker extension in your IDE and see false-positive missing import warnings, ensure the type checker points to your local virtual environment:
 
-## Database Migrations
-
-```bash
-# Generate a new migration
-alembic revision --autogenerate -m "description"
-
-# Apply migrations
-alembic upgrade head
-
-# Rollback
-alembic downgrade -1
-```
+1. Ensure `pyrefly.toml` exists at the root of the workspace.
+2. In `backend/pyproject.toml`, the config section `[tool.pyrefly]` is already set up to point to the local `venv`:
+    ```toml
+    [tool.pyrefly]
+    python_interpreter = "venv/bin/python"
+    python-interpreter-path = "venv/bin/python"
+    search_path = ["."]
+    ```
+3. If errors persist, reload your IDE window (e.g. `⌘ + Shift + P` -> `Developer: Reload Window` in VS Code) to clear the in-memory cache.

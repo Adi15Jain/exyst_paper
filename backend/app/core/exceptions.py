@@ -5,7 +5,7 @@ All application-specific exceptions inherit from ExystBaseError,
 enabling consistent error handling across the codebase.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class ExystBaseError(Exception):
@@ -15,7 +15,7 @@ class ExystBaseError(Exception):
         self,
         message: str = "An unexpected error occurred",
         status_code: int = 500,
-        details: Optional[Dict[str, Any]] = None,
+        details: dict[str, Any] | None = None,
     ):
         self.message = message
         self.status_code = status_code

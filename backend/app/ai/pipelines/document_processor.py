@@ -10,8 +10,6 @@ Also extracts metadata (year, course code, marks) from the text.
 
 import hashlib
 import re
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 from pdfminer.high_level import extract_pages
 from pdfminer.layout import LTTextContainer
@@ -27,7 +25,7 @@ class DocumentProcessor:
     Processes uploaded PDF documents into structured text.
     """
 
-    def extract_pages_text(self, pdf_path: str) -> List[Dict[str, str]]:
+    def extract_pages_text(self, pdf_path: str) -> list[dict[str, str]]:
         """
         Extract text from each page of a PDF.
 
@@ -71,7 +69,7 @@ class DocumentProcessor:
 
         return pages
 
-    def _extract_with_pymupdf(self, pdf_path: str) -> List[Dict[str, str]]:
+    def _extract_with_pymupdf(self, pdf_path: str) -> list[dict[str, str]]:
         """Fallback extraction using PyMuPDF."""
         try:
             import fitz  # PyMuPDF
@@ -101,13 +99,13 @@ class DocumentProcessor:
         except Exception as e:
             raise PDFParsingError(f"Both PDF extraction strategies failed: {str(e)}")
 
-    def extract_metadata(self, text: str) -> Dict[str, Optional[str]]:
+    def extract_metadata(self, text: str) -> dict[str, str | None]:
         """
         Extract exam metadata from text using regex patterns.
 
         Extracts: university, course_code, subject, max_marks, academic_session, duration.
         """
-        metadata: Dict[str, Optional[str]] = {
+        metadata: dict[str, str | None] = {
             "university": self._extract_university(text),
             "course_code": self._extract_course_code(text),
             "subject": self._extract_subject(text),
@@ -127,7 +125,7 @@ class DocumentProcessor:
                 sha256.update(chunk)
         return sha256.hexdigest()
 
-    def split_papers_by_session(self, text: str) -> List[Dict[str, str]]:
+    def split_papers_by_session(self, text: str) -> list[dict[str, str]]:
         """
         Split concatenated question paper text into individual papers by session year.
 
@@ -140,9 +138,9 @@ class DocumentProcessor:
         papers = []
         i = 0
         while i < len(parts):
-            if i + 1 < len(parts) and re.match(session_pattern, parts[i + 1] if i + 1 < len(parts) else ""):
+            if i + 1 < len(parts) and re.match(session_pattern, parts[i + 1]):
                 # Skip the pre-match text, take the session and content
-                session = parts[i + 1].strip() if i + 1 < len(parts) else "Unknown"
+                session = parts[i + 1].strip()
                 content = parts[i + 2].strip() if i + 2 < len(parts) else ""
                 if content:
                     papers.append({"session": session, "text": f"{session}\n{content}"})
@@ -159,7 +157,7 @@ class DocumentProcessor:
 
     # --- Private extraction helpers ---
 
-    def _extract_university(self, text: str) -> Optional[str]:
+    def _extract_university(self, text: str) -> str | None:
         patterns = [
             r"([A-Z][A-Z\s]+UNIVERSITY[A-Z\s–-]*)",
             r"TEERTHANKER MAHAVEER UNIVERSITY",
@@ -170,7 +168,7 @@ class DocumentProcessor:
                 return match.group(1).strip()
         return None
 
-    def _extract_course_code(self, text: str) -> Optional[str]:
+    def _extract_course_code(self, text: str) -> str | None:
         patterns = [
             r"Course\s*Code\s*[:：]\s*([A-Z]+\d+)",
             r"\b([A-Z]{2,}\d{3,})\b",
@@ -181,7 +179,7 @@ class DocumentProcessor:
                 return match.group(1)
         return None
 
-    def _extract_subject(self, text: str) -> Optional[str]:
+    def _extract_subject(self, text: str) -> str | None:
         """Extract subject from context — not hardcoded to any specific subject."""
         # Look for explicit subject/course name markers
         patterns = [
@@ -194,7 +192,7 @@ class DocumentProcessor:
                 return match.group(1).strip()
         return None
 
-    def _extract_max_marks(self, text: str) -> Optional[str]:
+    def _extract_max_marks(self, text: str) -> str | None:
         patterns = [
             r"Max\.?\s*Marks?\s*[:：]\s*(\d+)",
             r"Maximum\s*Marks?\s*[:：]\s*(\d+)",
@@ -206,7 +204,7 @@ class DocumentProcessor:
                 return match.group(1)
         return None
 
-    def _extract_session(self, text: str) -> Optional[str]:
+    def _extract_session(self, text: str) -> str | None:
         patterns = [
             r"(20\d{2}[-–]\d{2})",
             r"((?:May|Dec|Jan|Jun|Jul|Nov)\s+20\d{2})",
@@ -217,7 +215,7 @@ class DocumentProcessor:
                 return match.group(1)
         return None
 
-    def _extract_duration(self, text: str) -> Optional[str]:
+    def _extract_duration(self, text: str) -> str | None:
         patterns = [
             r"Time\s*[:：]\s*([\d.]+\s*(?:Hours?|Hrs?))",
             r"Duration\s*[:：]\s*([\d.]+\s*(?:Hours?|Hrs?))",

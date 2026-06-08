@@ -6,7 +6,6 @@ All models use UUID primary keys and include audit timestamps.
 
 import enum
 import uuid
-from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column,
@@ -28,7 +27,7 @@ class Base(DeclarativeBase):
     pass
 
 
-class ProcessingStatus(str, enum.Enum):
+class ProcessingStatus(enum.StrEnum):
     """Status of a processing job."""
     PENDING = "pending"
     PROCESSING = "processing"

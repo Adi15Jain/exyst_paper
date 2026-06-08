@@ -10,8 +10,7 @@ Coordinates:
 """
 
 import time
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -121,7 +120,7 @@ class AnalysisService:
             processing_time = round(time.perf_counter() - start_time, 2)
             analysis.processing_time_seconds = processing_time
             analysis.status = ProcessingStatus.COMPLETED
-            analysis.completed_at = datetime.now(timezone.utc)
+            analysis.completed_at = datetime.now(UTC)
 
             document.status = ProcessingStatus.COMPLETED
 
@@ -157,7 +156,7 @@ class AnalysisService:
         document_id: UUID,
         user_id: UUID,
         db: AsyncSession,
-    ) -> Optional[Analysis]:
+    ) -> Analysis | None:
         """Get the latest analysis for a document."""
         stmt = (
             select(Analysis)

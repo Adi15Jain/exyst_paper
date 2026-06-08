@@ -9,8 +9,6 @@ Orchestrates:
 """
 
 import time
-from datetime import datetime, timezone
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -20,7 +18,7 @@ from app.ai.evaluation import Evaluator
 from app.ai.pipelines.predictor import Predictor
 from app.ai.pipelines.syllabus_analyzer import SyllabusStructure
 from app.config import get_settings
-from app.core.exceptions import AnalysisError, NotFoundError, PredictionError
+from app.core.exceptions import AnalysisError, PredictionError
 from app.core.logging import get_logger
 from app.models import Analysis, Document, Prediction, ProcessingStatus
 
@@ -77,10 +75,13 @@ class PredictionService:
                 analysis.syllabus_structure or {}
             )
 
-            # 3. Prepare metadata
-            metadata = {
+            max_marks = "100"
+            if analysis.pattern_analysis:
+                max_marks = str(analysis.pattern_analysis.get("max_marks", "100"))
+
+            metadata: dict[str, str | None] = {
                 "subject": syllabus.course_title or "Unknown",
-                "max_marks": str(analysis.pattern_analysis.get("max_marks", "100")) if analysis.pattern_analysis else "100",
+                "max_marks": max_marks,
                 "duration": "3 Hours",
             }
 
@@ -161,7 +162,7 @@ class PredictionService:
         document_id: UUID,
         user_id: UUID,
         db: AsyncSession,
-    ) -> Optional[Prediction]:
+    ) -> Prediction | None:
         """Get the latest prediction for a document."""
         stmt = (
             select(Prediction)

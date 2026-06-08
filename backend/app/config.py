@@ -6,7 +6,6 @@ This ensures no secrets are hardcoded and configuration is validated at startup.
 """
 
 from functools import lru_cache
-from typing import List
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -28,7 +27,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Exyst"
     APP_VERSION: str = "2.0.0"
     DEBUG: bool = False
-    CORS_ORIGINS: List[str] = ["http://localhost:3000"]
+    CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # --- LLM Providers ---
     GROQ_API_KEY: str = ""
@@ -57,12 +56,16 @@ class Settings(BaseSettings):
         return self.MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
     @property
+    def is_sqlite(self) -> bool:
+        return "sqlite" in self.DATABASE_URL
+
+    @property
     def database_url_sync(self) -> str:
         """Sync database URL for Alembic migrations."""
         return self.DATABASE_URL.replace("+asyncpg", "+psycopg2")
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """
     Cached settings instance.

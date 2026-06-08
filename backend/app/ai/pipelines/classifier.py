@@ -4,7 +4,7 @@ Document classifier — determines whether a page is from a syllabus or question
 Uses LLM classification with few-shot prompting for accuracy.
 """
 
-from typing import List, Literal
+from typing import Literal
 
 from app.ai.llm_client import LLMClient
 from app.core.logging import get_logger
@@ -57,7 +57,8 @@ class Classifier:
         if not page_text.strip():
             return "question_paper"  # Default for empty pages
 
-        prompt = CLASSIFIER_USER_PROMPT.format(page_text=page_text[:3000])  # Truncate for token limits
+        # Truncate for token limits
+        prompt = CLASSIFIER_USER_PROMPT.format(page_text=page_text[:3000])
 
         try:
             result = await self.llm.complete_json(
@@ -87,7 +88,7 @@ class Classifier:
             return "question_paper"
 
     async def classify_document(
-        self, pages: List[dict]
+        self, pages: list[dict]
     ) -> dict:
         """
         Classify all pages of a document and split into syllabus vs question paper text.
@@ -98,9 +99,9 @@ class Classifier:
         Returns:
             Dict with 'syllabus_text', 'question_paper_text', and 'page_classifications'.
         """
-        syllabus_pages: List[str] = []
-        question_pages: List[str] = []
-        page_classifications: List[dict] = []
+        syllabus_pages: list[str] = []
+        question_pages: list[str] = []
+        page_classifications: list[dict] = []
 
         for page in pages:
             page_num = page["page_number"]

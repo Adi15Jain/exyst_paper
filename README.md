@@ -23,8 +23,8 @@
 
 ```
 ┌──────────────────┐     ┌───────────────────────────────────────────┐     ┌──────────┐
-│  Next.js 15      │     │             FastAPI Backend               │     │PostgreSQL│
-│  Frontend        │────▶│                                           │────▶│  16      │
+│  Next.js 15      │     │             FastAPI Backend               │     │Neon      │
+│  Frontend        │────▶│                                           │────▶│PostgreSQL│
 │                  │     │  ┌─────────┐  ┌──────────┐  ┌─────────┐  │     │  Users   │
 │  • Landing Page  │     │  │ Auth    │  │ Document │  │Analysis │  │     │  Docs    │
 │  • Login/Signup  │     │  │ Service │  │ Service  │  │Service  │  │     │  Results │
@@ -35,10 +35,10 @@
 └──────────────────┘     │  │                                     │  │────▶│ Vectors  │
                          │  │  PDF Parser → Classifier →          │  │     └──────────┘
                          │  │  Syllabus Analyzer →                 │  │
-                         │  │  Pattern Analyzer → RAG Retrieval →  │  │     ┌──────────┐
-                         │  │  Predictor → Evaluator               │  │     │  Redis   │
-                         │  └─────────────────────────────────────┘  │────▶│  Cache   │
-                         └───────────────────────────────────────────┘     └──────────┘
+                         │  │  Pattern Analyzer → RAG Retrieval →  │  │
+                         │  │  Predictor → Evaluator               │  │
+                         │  └─────────────────────────────────────┘  │
+                         └───────────────────────────────────────────┘
 ```
 
 ## 🧠 AI Pipeline
@@ -97,9 +97,8 @@ PDF Upload
 | **Backend**  | FastAPI, Python 3.11+, Pydantic v2, SQLAlchemy 2.0   |
 | **AI/LLM**   | LiteLLM (Groq/gemma2-9b-it), structured JSON outputs |
 | **RAG**      | ChromaDB (vector embeddings, semantic search)        |
-| **Database** | PostgreSQL 16, Alembic migrations                    |
-| **Cache**    | Redis 7                                              |
-| **Auth**     | JWT (access + refresh tokens), bcrypt                |
+| **Database** | Neon PostgreSQL (serverless, cloud-hosted)            |
+| **Auth**     | JWT (access + refresh tokens), bcrypt (direct)       |
 | **Logging**  | structlog (JSON structured logging)                  |
 | **DevOps**   | Docker Compose, GitHub Actions CI/CD                 |
 | **Testing**  | pytest (16 tests), pytest-asyncio, pytest-cov        |
@@ -110,7 +109,7 @@ PDF Upload
 
 ### Prerequisites
 
-- Docker & Docker Compose
+- Python 3.11+ and Node.js 20+
 - A Groq API key ([get one free](https://console.groq.com))
 
 ### 1. Clone & configure
@@ -121,16 +120,30 @@ cd exyst_paper
 
 # Set up your environment
 cp backend/.env.example backend/.env
-# Edit backend/.env and add your GROQ_API_KEY
+# Edit backend/.env and add your GROQ_API_KEY and DATABASE_URL
 ```
 
-### 2. Run with Docker Compose
+### 2. Run locally
+
+```bash
+# Backend (terminal 1)
+cd backend
+python -m venv venv && source venv/bin/activate
+pip install -e ".[dev]"
+uvicorn app.main:app --reload
+
+# Frontend (terminal 2)
+cd frontend
+npm install && npm run dev
+```
+
+### 3. Run with Docker Compose (alternative)
 
 ```bash
 docker compose up --build
 ```
 
-### 3. Access the app
+### 4. Access the app
 
 | Service                | URL                                 |
 | ---------------------- | ----------------------------------- |
@@ -138,19 +151,7 @@ docker compose up --build
 | **API Docs (Swagger)** | http://localhost:8000/docs          |
 | **Health Check**       | http://localhost:8000/api/v1/health |
 
-### Local Development (without Docker)
-
-```bash
-# Backend
-cd backend
-python -m venv venv && source venv/bin/activate
-pip install -e ".[dev]"
-uvicorn app.main:app --reload
-
-# Frontend (separate terminal)
-cd frontend
-npm install && npm run dev
-```
+> **Note:** The backend automatically creates all database tables on startup — no manual migration needed for initial setup. Tables are created via SQLAlchemy's `create_all` in the app lifespan handler.
 
 ---
 
@@ -206,6 +207,7 @@ npm install && npm run dev
 - Background task support for long-running analysis
 - Health check endpoint with dependency status
 - CORS configuration for frontend-backend communication
+- Lifespan-managed startup/shutdown (auto table creation, clean engine disposal)
 
 ---
 
@@ -249,12 +251,13 @@ Health:
 ```
 exyst/
 ├── docker-compose.yml              # Multi-service orchestration
+├── pyrefly.toml                    # Python type checker config (venv)
 ├── .github/workflows/ci.yml        # CI/CD pipeline
 ├── README.md                       # ← You are here
 │
 ├── backend/
 │   ├── app/
-│   │   ├── main.py                 # Slim entry point (~50 lines)
+│   │   ├── main.py                 # Entry point (lifespan handler)
 │   │   ├── config.py               # Pydantic Settings
 │   │   ├── dependencies.py         # FastAPI DI
 │   │   ├── api/v1/                 # Route layer (6 modules)
@@ -268,7 +271,7 @@ exyst/
 │   │   │   ├── exceptions.py       # Custom exception hierarchy
 │   │   │   ├── logging.py          # structlog setup
 │   │   │   ├── middleware.py       # Request ID, timing, errors
-│   │   │   └── security.py        # JWT utilities
+│   │   │   └── security.py        # JWT + bcrypt utilities
 │   │   ├── models/                 # SQLAlchemy ORM (4 models)
 │   │   ├── schemas/                # Pydantic request/response
 │   │   ├── services/               # Business logic layer
@@ -285,7 +288,8 @@ exyst/
 │   ├── tests/                      # 16 tests (API + AI + RAG)
 │   ├── alembic/                    # DB migrations
 │   ├── pyproject.toml              # Modern Python packaging
-│   └── Dockerfile
+│   ├── Dockerfile
+│   └── .dockerignore
 │
 └── frontend/
     ├── pages/                      # 8 pages
@@ -304,7 +308,8 @@ exyst/
     │   ├── api.ts                  # Typed API client (auto-refresh)
     │   └── auth-context.tsx        # React auth context
     ├── styles/globals.css          # Design system (glassmorphism)
-    └── Dockerfile
+    ├── Dockerfile
+    └── .dockerignore
 ```
 
 ---

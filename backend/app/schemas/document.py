@@ -3,7 +3,6 @@ Document schemas.
 """
 
 from datetime import datetime
-from typing import List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -28,7 +27,7 @@ class DocumentResponse(BaseModel):
     original_filename: str
     file_size_bytes: int
     status: str
-    error_message: Optional[str] = None
+    error_message: str | None = None
     uploaded_at: datetime
     has_analysis: bool = False
     has_prediction: bool = False
@@ -38,7 +37,7 @@ class DocumentResponse(BaseModel):
 
 class DocumentListResponse(BaseModel):
     """Paginated list of documents."""
-    documents: List[DocumentResponse]
+    documents: list[DocumentResponse]
     total: int
     page: int = 1
     per_page: int = 20

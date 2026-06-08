@@ -7,11 +7,10 @@ These Pydantic models serve dual purpose:
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
-
 
 # --- LLM Output Models (used to enforce structured LLM responses) ---
 
@@ -24,7 +23,7 @@ class PredictedQuestion(BaseModel):
     marks: int = Field(ge=1, le=100)
     question_type: Literal["short", "medium", "long"] = "medium"
     has_parts: bool = False
-    parts: List[Dict[str, Any]] = []
+    parts: list[dict[str, Any]] = []
     confidence: float = Field(
         ge=0.0, le=1.0, default=0.5,
         description="Model confidence in this question appearing (0-1)"
@@ -40,13 +39,13 @@ class PredictedSection(BaseModel):
     section_name: str
     title: str
     description: str = ""
-    questions: List[PredictedQuestion] = []
+    questions: list[PredictedQuestion] = []
     total_marks: int = 0
 
 
 class PredictedPaper(BaseModel):
     """Complete predicted question paper — the main LLM output schema."""
-    paper_info: Dict[str, Any] = Field(
+    paper_info: dict[str, Any] = Field(
         default_factory=lambda: {
             "title": "Predicted Question Paper",
             "subject": "Unknown",
@@ -56,9 +55,9 @@ class PredictedPaper(BaseModel):
             "instructions": ["Answer all questions"],
         }
     )
-    sections: List[PredictedSection] = []
+    sections: list[PredictedSection] = []
     total_questions: int = 0
-    topic_coverage: Dict[str, float] = Field(
+    topic_coverage: dict[str, float] = Field(
         default_factory=dict,
         description="Mapping of topic → coverage percentage (0-1)"
     )
@@ -83,7 +82,7 @@ class ConfidenceReport(BaseModel):
     question_quality_score: float = Field(
         description="Average quality of generated questions"
     )
-    per_question_confidence: List[Dict[str, Any]] = []
+    per_question_confidence: list[dict[str, Any]] = []
 
 
 class PredictionResponse(BaseModel):
@@ -96,12 +95,12 @@ class PredictionResponse(BaseModel):
 
     # Quality metrics
     confidence: ConfidenceReport
-    topic_coverage: Dict[str, float] = {}
+    topic_coverage: dict[str, float] = {}
 
     # Metadata
-    model_used: Optional[str] = None
-    prompt_version: Optional[str] = None
-    generation_time_seconds: Optional[float] = None
+    model_used: str | None = None
+    prompt_version: str | None = None
+    generation_time_seconds: float | None = None
     generated_at: datetime
 
     model_config = {"from_attributes": True}
