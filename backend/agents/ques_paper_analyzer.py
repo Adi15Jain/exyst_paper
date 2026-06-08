@@ -7,7 +7,7 @@ from typing import Dict, List, Any, Optional
 
 load_dotenv()
 
-api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GROQ_API_KEY")
+api_key = os.environ.get("GEMINI_API_KEY")
 
 
 def _clean_llm_json(extracted: str) -> str:

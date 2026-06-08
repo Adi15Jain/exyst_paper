@@ -6,7 +6,7 @@ import json
 
 load_dotenv()
 
-api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GROQ_API_KEY")
+api_key = os.environ.get("GEMINI_API_KEY") 
 
 def extract_syllabus_with_llm(syllabus_text: str) -> dict:
     prompt = f"""

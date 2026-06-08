@@ -9,11 +9,12 @@ from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.core.exceptions import DocumentNotFoundError, DocumentUploadError
 from app.core.logging import get_logger
-from app.models import Document, ProcessingStatus
+from app.models import Analysis, Document, ProcessingStatus
 from app.schemas.document import DocumentListResponse, DocumentResponse, DocumentUploadResponse
 
 logger = get_logger(__name__)
@@ -140,6 +141,9 @@ class DocumentService:
         stmt = (
             select(Document)
             .where(Document.user_id == user_id)
+            .options(
+                selectinload(Document.analyses).selectinload(Analysis.predictions)
+            )
             .order_by(Document.uploaded_at.desc())
             .offset(offset)
             .limit(per_page)

@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ✅ Set your API Key
-api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GROQ_API_KEY")
+api_key = os.environ.get("GEMINI_API_KEY") 
 
 # ✅ Classify a page of text using Gemini
 def classify_chunk_with_llm(text: str) -> Literal["question_paper", "syllabus"]:
