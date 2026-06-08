@@ -7,7 +7,7 @@ from typing import Dict, List, Any, Optional
 
 load_dotenv()
 
-api_key = os.environ["GROQ_API_KEY"]
+api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GROQ_API_KEY")
 
 
 def _clean_llm_json(extracted: str) -> str:
@@ -49,7 +49,7 @@ def analyze_question_paper(question_paper_text: str) -> Dict[str, Any]:
 
     try:
         response = completion(
-            model="groq/gemma2-9b-it",
+            model="gemini/gemini-2.5-flash",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
             stream=False,
@@ -99,7 +99,7 @@ def extract_question_patterns(question_paper_text: str) -> Dict[str, Any]:
 
     try:
         response = completion(
-            model="groq/gemma2-9b-it",
+            model="gemini/gemini-2.5-flash",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             stream=False,
@@ -144,7 +144,7 @@ def compare_question_papers(papers: List[str]) -> Dict[str, Any]:
 
     try:
         response = completion(
-            model="groq/gemma2-9b-it",
+            model="gemini/gemini-2.5-flash",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             stream=False,
@@ -195,7 +195,7 @@ def predict_next_paper_structure(question_papers: List[str], syllabus_text: Opti
 
     try:
         response = completion(
-            model="groq/gemma2-9b-it",
+            model="gemini/gemini-2.5-flash",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4,
             stream=False,

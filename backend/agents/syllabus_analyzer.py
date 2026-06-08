@@ -6,7 +6,7 @@ import json
 
 load_dotenv()
 
-api_key = os.environ["GROQ_API_KEY"] 
+api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GROQ_API_KEY")
 
 def extract_syllabus_with_llm(syllabus_text: str) -> dict:
     prompt = f"""
@@ -19,7 +19,7 @@ def extract_syllabus_with_llm(syllabus_text: str) -> dict:
     """
 
     response = completion(
-        model="groq/gemma2-9b-it",
+        model="gemini/gemini-2.5-flash",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
         stream=False,

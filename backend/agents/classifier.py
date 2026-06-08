@@ -7,10 +7,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ✅ Set your Groq API Key
-api_key = os.environ['GROQ_API_KEY']
+# ✅ Set your API Key
+api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GROQ_API_KEY")
 
-# ✅ Classify a page of text using Groq LLaMA 3
+# ✅ Classify a page of text using Gemini
 def classify_chunk_with_llm(text: str) -> Literal["question_paper", "syllabus"]:
     prompt = f"""
     You are a strict academic document classifier.
@@ -65,7 +65,7 @@ def classify_chunk_with_llm(text: str) -> Literal["question_paper", "syllabus"]:
     """
 
     response = completion(
-        model="groq/gemma2-9b-it",
+        model="gemini/gemini-2.5-flash",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.0,
         stream=False

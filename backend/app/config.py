@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GROQ_API_KEY: str = ""
     HF_TOKEN: str = ""
-    DEFAULT_LLM_MODEL: str = "gemini/gemini-1.5-flash"
+    DEFAULT_LLM_MODEL: str = "gemini/gemini-2.5-flash"
 
     # --- Database ---
     DATABASE_URL: str = "postgresql+asyncpg://exyst:exyst_password@localhost:5432/exyst_db"
