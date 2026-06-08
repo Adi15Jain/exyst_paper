@@ -164,6 +164,7 @@ class Predictor:
                 prompt=prompt,
                 system_prompt=PREDICTOR_SYSTEM_PROMPT,
                 temperature=0.4,
+                response_format={"type": "json_object"},
             )
 
             paper = response.parse_as(PredictedPaper)
@@ -180,9 +181,11 @@ class Predictor:
             return paper  # type: ignore
 
         except Exception as e:
-            logger.error("prediction_failed", error=str(e))
+            import traceback
+            error_msg = f"{str(e)}: {traceback.format_exc()}"
+            logger.error("prediction_failed", error=error_msg)
             # Return a minimal valid paper rather than crashing
-            return self._create_fallback_paper(syllabus, metadata)
+            return self._create_fallback_paper(syllabus, metadata, error_msg)
 
     def _format_topics_by_unit(self, syllabus: SyllabusStructure) -> str:
         """Format syllabus topics for prompt context."""
@@ -227,6 +230,7 @@ class Predictor:
         self,
         syllabus: SyllabusStructure,
         metadata: dict[str, str | None],
+        error_msg: str = "Unknown error",
     ) -> PredictedPaper:
         """Create a minimal valid paper when LLM fails."""
         current_year = datetime.now().year
@@ -244,7 +248,7 @@ class Predictor:
                 PredictedSection(
                     section_name="Section A",
                     title="Questions",
-                    description="Prediction generation encountered an error. Please retry.",
+                    description=f"Prediction generation encountered an error: {error_msg}. Please retry.",
                     questions=[],
                     total_marks=0,
                 )
