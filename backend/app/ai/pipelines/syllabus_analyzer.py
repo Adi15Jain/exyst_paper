@@ -65,7 +65,8 @@ class SyllabusAnalyzer:
     """
 
     def __init__(self, llm_client: LLMClient | None = None):
-        self.llm = llm_client or LLMClient()
+        # Syllabus extraction is a structured task — use lite tier to save quota
+        self.llm = llm_client or LLMClient(tier="lite")
 
     async def analyze(self, syllabus_text: str) -> SyllabusStructure:
         """

@@ -3,8 +3,8 @@ Pattern analyzer — detects topic frequency, trends, and recurring patterns
 across multiple question papers.
 
 This is the analytical engine that powers prediction confidence.
-Uses code-based analysis (not LLM) for frequency calculations,
-and LLM for semantic topic matching.
+Uses a SINGLE batched LLM call for all papers (quota-efficient),
+and code-based analysis for frequency calculations.
 """
 
 from collections import Counter, defaultdict
@@ -15,69 +15,55 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-TOPIC_EXTRACTION_PROMPT = """Analyze this question paper text and extract the topics covered, questions details, and overall exam metadata.
+# Batched prompt — analyzes ALL papers in one LLM call instead of N separate calls
+BATCH_TOPIC_EXTRACTION_PROMPT = """Analyze the following {num_papers} question papers and extract topics, questions, and metadata from EACH paper.
 
-Return a JSON object with:
-- "max_marks": integer or null (maximum marks of the exam paper, e.g. 60 or 100)
-- "duration": string or null (duration of the exam, e.g. "3 Hours", "2 Hours")
-- "instructions": array of strings (exam instructions list, e.g. ["Attempt all questions", "Scientific calculators allowed"])
-- "questions": array of objects, each with:
-    - "question_number": integer
-    - "question_text": string (brief summary)
-    - "topic": string (the main topic/concept)
-    - "sub_topics": array of strings
-    - "marks": integer
-    - "question_type": "short" | "medium" | "long"
+Return a JSON object with this structure:
+{{
+    "papers": [
+        {{
+            "session": "paper_0",
+            "max_marks": 60,
+            "duration": "3 Hours",
+            "instructions": ["Attempt all questions"],
+            "questions": [
+                {{
+                    "question_number": 1,
+                    "question_text": "Brief summary of the question",
+                    "topic": "Main topic/concept",
+                    "sub_topics": ["sub-topic1"],
+                    "marks": 5,
+                    "question_type": "short"
+                }}
+            ]
+        }}
+    ]
+}}
+
+question_type MUST be one of: "short", "medium", "long"
 
 ---
 
-Question paper text:
-{paper_text}
+{papers_text}
 """
 
 
 class PatternAnalyzer:
     """
     Analyzes patterns across multiple question papers.
+    Uses lite-tier models and batched calls for quota efficiency.
     """
 
     def __init__(self, llm_client: LLMClient | None = None):
-        self.llm = llm_client or LLMClient()
-
-    async def extract_topics_from_paper(self, paper_text: str) -> dict[str, Any]:
-        """
-        Extract topics and metadata from a single question paper using LLM.
-
-        Returns:
-            Dict containing questions list, max_marks, duration, instructions.
-        """
-        if not paper_text.strip():
-            return {"questions": []}
-
-        prompt = TOPIC_EXTRACTION_PROMPT.format(
-            paper_text=paper_text[:6000]
-        )
-
-        try:
-            result = await self.llm.complete_json(
-                prompt=prompt,
-                system_prompt=(
-                    "You are an academic content analyzer. "
-                    "Extract question topics and exam metadata precisely. Return valid JSON only."
-                ),
-                temperature=0.1,
-            )
-            return result
-        except Exception as e:
-            logger.warning("topic_extraction_failed", error=str(e))
-            return {"questions": []}
+        # Use lite tier — pattern extraction is structured, doesn't need top model
+        self.llm = llm_client or LLMClient(tier="lite")
 
     async def analyze_frequency(
         self,
         papers: list[dict[str, str]],
     ) -> dict[str, Any]:
         """
-        Analyze topic frequency across multiple papers.
+        Analyze topic frequency across multiple papers using a SINGLE batched LLM call.
 
         Args:
             papers: List of dicts with 'session' and 'text' keys.
@@ -85,15 +71,55 @@ class PatternAnalyzer:
         Returns:
             Dict with frequency data, trends, and patterns.
         """
+        if not papers:
+            return {
+                "frequency": [],
+                "patterns": {},
+                "topic_by_session": {},
+                "questions_by_paper": [],
+            }
+
+        # --- BATCHED extraction: one LLM call for ALL papers ---
+        papers_text_parts = []
+        for i, paper in enumerate(papers):
+            session = paper.get("session", f"paper_{i}")
+            # Truncate each paper to keep within token limits
+            text = paper["text"][:4000]
+            papers_text_parts.append(f"=== PAPER {i} (Session: {session}) ===\n{text}")
+
+        combined_text = "\n\n".join(papers_text_parts)
+
+        prompt = BATCH_TOPIC_EXTRACTION_PROMPT.format(
+            num_papers=len(papers),
+            papers_text=combined_text,
+        )
+
+        try:
+            result = await self.llm.complete_json(
+                prompt=prompt,
+                system_prompt=(
+                    "You are an academic content analyzer. "
+                    "Extract question topics and exam metadata from ALL papers. Return valid JSON only."
+                ),
+                temperature=0.1,
+            )
+            papers_data = result.get("papers", [])
+        except Exception as e:
+            logger.warning("batch_topic_extraction_failed", error=str(e))
+            papers_data = []
+
+        # --- Process results ---
         all_topics: list[str] = []
         topic_by_session: dict[str, list[str]] = defaultdict(list)
         questions_by_paper: list[list[dict]] = []
         max_marks_list: list[int] = []
         durations_list: list[str] = []
 
-        for paper in papers:
-            session = paper.get("session", "Unknown")
-            paper_data = await self.extract_topics_from_paper(paper["text"])
+        for i, paper in enumerate(papers):
+            session = paper.get("session", f"paper_{i}")
+
+            # Match paper data from LLM response
+            paper_data = papers_data[i] if i < len(papers_data) else {}
             questions = paper_data.get("questions", [])
             questions_by_paper.append(questions)
 
@@ -186,6 +212,7 @@ class PatternAnalyzer:
             unique_topics=len(topic_counts),
             max_marks=typical_max_marks,
             duration=typical_duration,
+            llm_calls_used=1,  # Just 1 batched call!
         )
 
         return {

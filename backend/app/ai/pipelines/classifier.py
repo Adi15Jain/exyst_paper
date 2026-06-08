@@ -41,7 +41,7 @@ class Classifier:
     """
 
     def __init__(self, llm_client: LLMClient | None = None):
-        self.llm = llm_client or LLMClient()
+        self.llm = llm_client or LLMClient(tier="lite")
 
     async def classify_document(
         self, pages: list[dict]

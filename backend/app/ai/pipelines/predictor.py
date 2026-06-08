@@ -129,10 +129,15 @@ class Predictor:
     """
     Generates predicted question papers using LLM with structured context.
     Uses a two-pass approach: Generate → Validate & Fix.
+
+    Generation uses the default (best) model.
+    Validation uses a lite model to save quota.
     """
 
     def __init__(self, llm_client: LLMClient | None = None):
         self.llm = llm_client or LLMClient()
+        # Use lite tier for validation — it's a simpler task
+        self.llm_lite = LLMClient(tier="lite")
 
     async def predict(
         self,
@@ -287,7 +292,7 @@ class Predictor:
                 paper_json=paper_json,
             )
 
-            response = await self.llm.complete(
+            response = await self.llm_lite.complete(
                 prompt=validator_prompt,
                 system_prompt=VALIDATOR_SYSTEM_PROMPT,
                 temperature=0.1,
