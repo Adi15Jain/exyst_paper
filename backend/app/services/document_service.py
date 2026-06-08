@@ -5,6 +5,7 @@ Document service — handles file upload, storage, and retrieval.
 import hashlib
 import os
 import time
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -90,11 +91,11 @@ class DocumentService:
         )
 
         return DocumentUploadResponse(
-            id=document.id,
+            id=cast(Any, document.id),
             filename=filename,
             file_size_bytes=len(file_content),
             status=document.status.value,
-            uploaded_at=document.uploaded_at,
+            uploaded_at=cast(Any, document.uploaded_at),
         )
 
     async def get_document(
@@ -153,13 +154,13 @@ class DocumentService:
 
         doc_responses = [
             DocumentResponse(
-                id=doc.id,
-                filename=doc.filename,
-                original_filename=doc.original_filename,
-                file_size_bytes=doc.file_size_bytes,
+                id=cast(Any, doc.id),
+                filename=cast(Any, doc.filename),
+                original_filename=cast(Any, doc.original_filename),
+                file_size_bytes=cast(Any, doc.file_size_bytes),
                 status=doc.status.value,
-                error_message=doc.error_message,
-                uploaded_at=doc.uploaded_at,
+                error_message=cast(Any, doc.error_message),
+                uploaded_at=cast(Any, doc.uploaded_at),
                 has_analysis=bool(doc.analyses),
                 has_prediction=any(
                     bool(a.predictions) for a in doc.analyses
