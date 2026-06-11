@@ -22,17 +22,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # --- Redis Cache ---
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   # --- FastAPI Backend ---
   backend:
     build:
@@ -42,18 +31,18 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://exyst:exyst_password@postgres:5432/exyst_db
-      - REDIS_URL=redis://redis:6379/0
       - DEBUG=true
       - CORS_ORIGINS=["http://localhost:3000"]
+      # Pass the Gemini key through from the host environment (or backend/.env).
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
     env_file:
-      - ./backend/.env
+      - path: ./backend/.env
+        required: false
     volumes:
       - ./backend:/app
       - backend_uploads:/app/uploads
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 

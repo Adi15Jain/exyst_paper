@@ -11,11 +11,10 @@ Optimized for free-tier rate limits with:
 Uses the official `google-genai` SDK exclusively — no litellm, no OpenAI.
 """
 
+import asyncio
 import hashlib
 import json
-import os
 import time
-import asyncio
 from typing import Any, TypeVar
 
 from google import genai
@@ -229,6 +228,7 @@ class LLMClient:
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.tier = tier
+        self.timeout = settings.LLM_TIMEOUT_SECONDS
 
         # Choose fallback chain based on tier
         if tier == "lite":
@@ -279,24 +279,45 @@ class LLMClient:
 
         last_error = None
 
+        # Ordered model candidates: start with the least rate-limited model, then
+        # rotate through the rest of the fallback chain. A model that is overloaded
+        # (503/UNAVAILABLE) or rate-limited is therefore NOT retried in place — the
+        # next attempt uses a different model, which is far more likely to succeed.
+        first_choice = _pick_best_model(self.preferred_model, self.fallback_chain)
+        candidates: list[str] = []
+        for m in [first_choice, self.preferred_model, *self.fallback_chain]:
+            if m not in candidates:
+                candidates.append(m)
+
         for attempt in range(1, self.max_retries + 1):
-            # Pick the best available model for this attempt
-            model = _pick_best_model(self.preferred_model, self.fallback_chain)
+            model = candidates[(attempt - 1) % len(candidates)]
 
             try:
                 start_time = time.perf_counter()
 
-                # Build config
+                # Gemma models don't support a system role or JSON-mime mode in AI
+                # Studio, so for them we fold the system prompt into the text and rely
+                # on parse_json()'s fence-stripping instead of response_mime_type.
+                is_gemma = model.startswith("gemma")
+                effective_prompt = prompt
+
                 config_kwargs: dict[str, Any] = {
                     "temperature": temperature,
                 }
                 if max_tokens:
                     config_kwargs["max_output_tokens"] = max_tokens
                 if system_prompt:
-                    config_kwargs["system_instruction"] = system_prompt
+                    if is_gemma:
+                        effective_prompt = f"{system_prompt}\n\n{prompt}"
+                    else:
+                        config_kwargs["system_instruction"] = system_prompt
 
-                # JSON mode
-                if response_format and response_format.get("type") == "json_object":
+                # JSON mode (not supported by Gemma)
+                if (
+                    response_format
+                    and response_format.get("type") == "json_object"
+                    and not is_gemma
+                ):
                     config_kwargs["response_mime_type"] = "application/json"
 
                 config = types.GenerateContentConfig(**config_kwargs)
@@ -304,15 +325,21 @@ class LLMClient:
                 # Track the request
                 _track_request(model)
 
-                # Use run_in_executor for sync SDK
+                # Use run_in_executor for sync SDK, bounded by a timeout so a
+                # hung request raises (and is retried) instead of stalling.
                 loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(
-                    None,
-                    lambda: self.client.models.generate_content(
-                        model=model,
-                        contents=prompt,
-                        config=config,
+                response = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda mdl=model, cfg=config, txt=effective_prompt: (
+                            self.client.models.generate_content(
+                                model=mdl,
+                                contents=txt,
+                                config=cfg,
+                            )
+                        ),
                     ),
+                    timeout=self.timeout,
                 )
 
                 latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
@@ -347,6 +374,20 @@ class LLMClient:
                     latency_ms=latency_ms,
                 )
 
+            except TimeoutError:
+                last_error = TimeoutError(
+                    f"Gemini call to {model} exceeded {self.timeout}s timeout"
+                )
+                logger.warning(
+                    "llm_call_timeout",
+                    model=model,
+                    attempt=attempt,
+                    timeout_seconds=self.timeout,
+                )
+                if attempt < self.max_retries:
+                    await asyncio.sleep(self.retry_delay * (2 ** (attempt - 1)))
+                continue
+
             except Exception as e:
                 last_error = e
                 err_msg = str(e).lower()
@@ -366,18 +407,24 @@ class LLMClient:
                 )
 
                 if attempt < self.max_retries:
+                    next_model = candidates[attempt % len(candidates)]
                     if is_rate_limit:
-                        # Rate limited — longer wait + will try fallback model on next attempt
-                        delay = 20.0 + (attempt * 10)
+                        # Rate limited — modest wait; the next attempt also switches model.
+                        delay = 8.0 + (attempt * 4)
                         logger.info(
                             "rate_limit_backoff",
                             model=model,
+                            next_model=next_model,
                             delay_seconds=delay,
-                            will_try_fallback=True,
                         )
                     else:
                         delay = self.retry_delay * (2 ** (attempt - 1))
-                        logger.info("retry_backoff", delay_seconds=delay)
+                        logger.info(
+                            "retry_backoff",
+                            model=model,
+                            next_model=next_model,
+                            delay_seconds=delay,
+                        )
 
                     await asyncio.sleep(delay)
 

@@ -318,7 +318,7 @@ export default function LandingPage() {
                         <span>•</span>
                         <span>Next.js</span>
                         <span>•</span>
-                        <span>LiteLLM</span>
+                        <span>Gemini</span>
                         <span>•</span>
                         <span>PostgreSQL</span>
                         <span>•</span>

@@ -9,7 +9,7 @@
 - **ORM**: SQLAlchemy 2.0 (async)
 - **Database**: Neon PostgreSQL (Serverless Cloud)
 - **Migrations**: Alembic
-- **AI/LLM**: LiteLLM (Groq), ChromaDB (RAG)
+- **AI/LLM**: Google AI Studio / Gemini (`google-genai`), ChromaDB (RAG)
 - **Auth**: JWT (PyJWT) + Direct bcrypt hashing (Python 3.14 compatible)
 - **Logging**: structlog (JSON)
 - **Testing**: pytest + pytest-asyncio
@@ -164,12 +164,24 @@ docker compose up --build
 
 Configure these in `backend/.env`:
 
-| Variable         | Required | Description                       |
-| ---------------- | -------- | --------------------------------- |
-| `GROQ_API_KEY`   | ✅       | Groq API key for LLM calls        |
-| `DATABASE_URL`   | ✅       | Neon PostgreSQL connection string |
-| `JWT_SECRET_KEY` | ✅       | Random 64-char hex string         |
-| `DEBUG`          |          | Enable debug mode                 |
+| Variable              | Required | Description                                          |
+| --------------------- | -------- | ---------------------------------------------------- |
+| `GEMINI_API_KEY`      | ✅       | Google AI Studio (Gemini) API key for LLM calls      |
+| `DATABASE_URL`        | ✅       | Neon PostgreSQL connection string                    |
+| `JWT_SECRET_KEY`      | ✅       | Random 64-char hex string                            |
+| `DEBUG`               |          | Enable debug mode (also auto-creates tables on boot) |
+| `LLM_TIMEOUT_SECONDS` |          | Per-call LLM timeout (default 90)                    |
+
+## Database Migrations
+
+The schema is owned by Alembic. In production (`DEBUG=false`) apply migrations
+before starting the app:
+
+```bash
+alembic upgrade head
+```
+
+In dev/test (`DEBUG=true`) tables are auto-created on startup, so this is optional locally.
 
 ## Testing & Linting
 

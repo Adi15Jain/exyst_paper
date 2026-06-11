@@ -3,19 +3,19 @@ SSE streaming endpoint — runs the full analysis + prediction pipeline
 with real-time progress events via Server-Sent Events.
 """
 
-import json
 import asyncio
+import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import get_logger
 from app.db.session import get_db
 from app.dependencies import get_current_user_id
 from app.services.analysis_service import AnalysisService
 from app.services.prediction_service import PredictionService
-from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -60,11 +60,17 @@ async def run_pipeline_stream(
             })
 
         # Emit initial event
-        yield _format_sse("stage", {"stage": "starting", "progress": 0, "detail": "Starting pipeline..."})
+        yield _format_sse(
+            "stage",
+            {"stage": "starting", "progress": 0, "detail": "Starting pipeline..."},
+        )
 
         try:
             # Phase 1: Analysis
-            yield _format_sse("stage", {"stage": "analysis_start", "progress": 5, "detail": "Starting AI analysis..."})
+            yield _format_sse(
+                "stage",
+                {"stage": "analysis_start", "progress": 5, "detail": "Starting AI analysis..."},
+            )
 
             analysis = await analysis_service.run_analysis(
                 document_id=document_id,
@@ -78,7 +84,14 @@ async def run_pipeline_stream(
                 event = await event_queue.get()
                 yield _format_sse(event["event"], event["data"])
 
-            yield _format_sse("stage", {"stage": "analysis_complete", "progress": 70, "detail": f"Analysis complete — {analysis.num_papers_found} papers found"})
+            yield _format_sse(
+                "stage",
+                {
+                    "stage": "analysis_complete",
+                    "progress": 70,
+                    "detail": f"Analysis complete — {analysis.num_papers_found} papers found",
+                },
+            )
 
             # Phase 2: Prediction
             prediction = await prediction_service.generate_prediction(

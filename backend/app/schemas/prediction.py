@@ -15,6 +15,19 @@ from pydantic import BaseModel, Field
 # --- LLM Output Models (used to enforce structured LLM responses) ---
 
 
+class QuestionPart(BaseModel):
+    """A labelled sub-part of a question (e.g. 'a', 'b')."""
+    label: str = ""           # e.g. "a", "b", "i"
+    question_text: str = ""
+    marks: int = 0
+
+
+class AlternativeQuestion(BaseModel):
+    """The 'Or' choice offered against a main question."""
+    question_text: str = ""
+    parts: list[QuestionPart] = []
+
+
 class PredictedQuestion(BaseModel):
     """A single predicted question with metadata."""
     question_number: int
@@ -23,7 +36,9 @@ class PredictedQuestion(BaseModel):
     marks: int = Field(ge=1, le=100)
     question_type: Literal["short", "medium", "long"] = "medium"
     has_parts: bool = False
-    parts: list[dict[str, Any]] = []
+    parts: list[QuestionPart] = []
+    # The internal-choice alternative ("Or ...") if the source format uses one.
+    or_choice: AlternativeQuestion | None = None
     confidence: float = Field(
         ge=0.0, le=1.0, default=0.5,
         description="Model confidence in this question appearing (0-1)"

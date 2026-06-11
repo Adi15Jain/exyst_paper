@@ -45,7 +45,7 @@ PDF Upload → PDF Extraction (pdfminer + PyMuPDF)
 | **AI Pipeline Stages** | 6 (extraction → classification → syllabus → patterns → RAG → prediction) |
 | **Test Suite** | 16 tests (API + AI pipelines + RAG) |
 | **Backend Architecture** | FastAPI + SQLAlchemy 2.0 + Pydantic v2 |
-| **LLM Provider** | LiteLLM (Groq/gemma2-9b-it) with structured JSON outputs |
+| **LLM Provider** | Google AI Studio / Gemini 2.5 Flash (`google-genai`) with structured JSON outputs |
 | **Vector Store** | ChromaDB for semantic similarity search |
 | **Database** | Neon PostgreSQL (serverless) |
 | **Auth** | JWT with refresh token rotation + bcrypt |
@@ -78,7 +78,7 @@ PDF Upload → PDF Extraction (pdfminer + PyMuPDF)
 
 ## Prompt B — "Tell me about a time you failed."
 
-> **Situation:** Exyst's prediction pipeline uses LiteLLM to call Groq's gemma2-9b-it model for generating predicted question papers. The pipeline assembles context from syllabus analysis, frequency data, and RAG-retrieved historical questions, then asks the LLM to produce a complete question paper as structured JSON — validated against a Pydantic schema (`PredictedPaper` with sections, questions, marks, confidence scores).
+> **Situation:** Exyst's prediction pipeline uses the `google-genai` SDK to call Google's Gemini 2.5 Flash model for generating predicted question papers. The pipeline assembles context from syllabus analysis, frequency data, and RAG-retrieved historical questions, then asks the LLM to produce a complete question paper as structured JSON — validated against a Pydantic schema (`PredictedPaper` with sections, questions, marks, confidence scores).
 >
 > **Task:** I was responsible for the entire AI prediction pipeline — from context assembly through LLM generation to output validation and confidence scoring.
 >

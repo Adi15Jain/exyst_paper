@@ -16,13 +16,25 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 # Batched prompt — analyzes ALL papers in one LLM call instead of N separate calls
-BATCH_TOPIC_EXTRACTION_PROMPT = """Analyze the following {num_papers} question papers and extract topics, questions, and metadata from EACH paper.
+BATCH_TOPIC_EXTRACTION_PROMPT = """You are given the verbatim text of {num_papers} university question paper(s).
+Extract the course metadata and the topic of every question, reading ONLY what is actually written.
+
+STRICT RULES:
+- The `topic` of each question MUST be the specific concept that question is about, taken
+  from the question's own words. Do NOT invent generic or unrelated topics. For example, a
+  question "Find the mean value of the following data" has topic "Mean / Measures of Central
+  Tendency" — NOT "Mathematics" or some unrelated subject.
+- `subject` is the course name printed in the paper header (e.g. "Fundamentals of Statistics").
+- If a value is not present in the text, use null. Never guess a subject or topic from outside
+  the paper's content.
 
 Return a JSON object with this structure:
 {{
     "papers": [
         {{
             "session": "paper_0",
+            "subject": "Course name from the header, or null",
+            "course_code": "Course code from the header, or null",
             "max_marks": 60,
             "duration": "3 Hours",
             "instructions": ["Attempt all questions"],
@@ -30,7 +42,7 @@ Return a JSON object with this structure:
                 {{
                     "question_number": 1,
                     "question_text": "Brief summary of the question",
-                    "topic": "Main topic/concept",
+                    "topic": "Specific concept this question tests",
                     "sub_topics": ["sub-topic1"],
                     "marks": 5,
                     "question_type": "short"
@@ -55,8 +67,9 @@ class PatternAnalyzer:
     """
 
     def __init__(self, llm_client: LLMClient | None = None):
-        # Use lite tier — pattern extraction is structured, doesn't need top model
-        self.llm = llm_client or LLMClient(tier="lite")
+        # Use the default (stronger) tier: topic grounding is the foundation of the whole
+        # prediction, and weaker models hallucinate unrelated topics here.
+        self.llm = llm_client or LLMClient()
 
     async def analyze_frequency(
         self,
@@ -114,6 +127,8 @@ class PatternAnalyzer:
         questions_by_paper: list[list[dict]] = []
         max_marks_list: list[int] = []
         durations_list: list[str] = []
+        subjects_list: list[str] = []
+        course_codes_list: list[str] = []
 
         for i, paper in enumerate(papers):
             session = paper.get("session", f"paper_{i}")
@@ -133,6 +148,12 @@ class PatternAnalyzer:
             duration = paper_data.get("duration")
             if duration:
                 durations_list.append(str(duration).strip())
+            subject = paper_data.get("subject")
+            if subject and str(subject).strip().lower() not in ("", "null", "none", "unknown"):
+                subjects_list.append(str(subject).strip())
+            course_code = paper_data.get("course_code")
+            if course_code and str(course_code).strip().lower() not in ("", "null", "none"):
+                course_codes_list.append(str(course_code).strip())
 
             for q in questions:
                 topic = q.get("topic", "")
@@ -159,6 +180,11 @@ class PatternAnalyzer:
 
         typical_max_marks = most_common_max_marks[0][0] if most_common_max_marks else 100
         typical_duration = most_common_duration[0][0] if most_common_duration else "3 Hours"
+
+        most_common_subject = Counter(subjects_list).most_common(1)
+        most_common_code = Counter(course_codes_list).most_common(1)
+        subject = most_common_subject[0][0] if most_common_subject else None
+        course_code = most_common_code[0][0] if most_common_code else None
 
         # Calculate typical question types and marks
         question_types_counts = defaultdict(int)
@@ -202,6 +228,8 @@ class PatternAnalyzer:
             ],
             "max_marks": typical_max_marks,
             "duration": typical_duration,
+            "subject": subject,
+            "course_code": course_code,
             "typical_question_format": typical_format_str,
         }
 

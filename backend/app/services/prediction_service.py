@@ -96,17 +96,27 @@ class PredictionService:
             max_marks = "100"
             duration = "3 Hours"
             typical_format = "No typical format patterns detected."
+            extracted_subject = None
             if analysis.pattern_analysis:
                 max_marks = str(analysis.pattern_analysis.get("max_marks", "100"))
                 duration = str(analysis.pattern_analysis.get("duration", "3 Hours"))
-                typical_format = analysis.pattern_analysis.get("typical_question_format", typical_format)
+                typical_format = analysis.pattern_analysis.get(
+                    "typical_question_format", typical_format
+                )
+                extracted_subject = analysis.pattern_analysis.get("subject")
+
+            # Prefer the subject extracted from the actual papers, then the syllabus.
+            subject = extracted_subject or syllabus.course_title or "Unknown"
 
             metadata: dict[str, str | None] = {
-                "subject": syllabus.course_title or "Unknown",
+                "subject": subject,
                 "max_marks": max_marks,
                 "duration": duration,
                 "typical_format": typical_format,
             }
+
+            # The actual past papers are the predictor's primary format + content template.
+            sample_papers = analysis.question_papers or []
 
             # 3. Prepare frequency data
             frequency_data = {
@@ -139,6 +149,7 @@ class PredictionService:
                 frequency_data=frequency_data,
                 metadata=metadata,
                 rag_context=rag_context,
+                sample_papers=sample_papers,
             )
 
             # 6. Evaluate prediction quality

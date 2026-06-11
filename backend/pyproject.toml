@@ -67,6 +67,13 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+# These modules hold multi-line LLM prompt templates whose lines are part of the
+# prompt text and cannot be wrapped without changing what the model receives.
+"app/ai/pipelines/classifier.py" = ["E501"]
+"app/ai/pipelines/pattern_analyzer.py" = ["E501"]
+"app/ai/pipelines/predictor.py" = ["E501"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

@@ -90,6 +90,197 @@ PDF Upload
 
 ---
 
+## 🔄 End-to-End Data Flow
+
+A single upload travels through the system as follows. Stages marked **(LLM)** call
+Gemini; everything else is deterministic Python.
+
+```
+1.  UPLOAD          Browser → POST /documents/upload (multipart)
+                    Client-side 50MB guard → backend validates type/size/empty.
+                    File written to UPLOAD_DIR/<user_id>/, SHA-256 hashed,
+                    Document row created (status=PENDING).
+
+2.  PIPELINE START  Browser opens an SSE stream: POST /pipeline/{id}/run-stream
+                    Progress events ("event: stage") are pushed as each stage runs.
+                    (REST fallback: POST /analysis/{id}/run schedules a background
+                     task + the client polls /analysis/{id}/status — used if the
+                     SSE connection drops.)
+
+3.  EXTRACT         pdfminer.six → text per page (PyMuPDF fallback). No LLM.
+
+4.  CLASSIFY (LLM)  One batched call labels every page "syllabus" | "question_paper".
+                    Pages are split into syllabus_text and question_paper_text.
+
+5.  SPLIT           question_paper_text is cut into individual papers on exam-header
+                    / session boundaries (e.g. "ODD Semester Examination 2021-22").
+
+6.  ANALYZE (LLM)   • Syllabus analyzer → units + topics (if a syllabus is present).
+                    • Pattern analyzer → ONE batched call over all papers, returning
+                      per-question topics, marks, the subject/course code, max marks,
+                      duration, and question-type mix. Frequencies & trends are then
+                      computed in plain Python (Counter), not by the LLM.
+
+7.  INDEX (RAG)     Each historical question + syllabus topic is upserted into
+                    ChromaDB as a vector embedding, tagged with {topic, marks,
+                    session, document_id}. Idempotent (stable IDs → no duplicates).
+
+8.  RETRIEVE (RAG)  For the top frequent topics + the course title, ChromaDB returns
+                    the most semantically-similar historical questions (cosine
+                    similarity), deduped and ranked → the "retrieved context".
+
+9.  PREDICT (LLM)   The predictor prompt is assembled from: the actual past papers
+                    (verbatim, as the format template) + extracted subject/marks +
+                    topic frequencies + the RAG-retrieved questions. Gemini writes a
+                    NEW paper in the SAME format. A second lite-model pass validates
+                    and repairs marks totals / structure.
+
+10. EVALUATE        Confidence is scored in Python across four factors (topic
+                    coverage, historical alignment, question quality, marks
+                    distribution). Empty/failed papers are auto-zeroed.
+
+11. PERSIST         Analysis + Prediction rows saved (JSONB). SSE emits "complete";
+                    the browser redirects to /documents/{id}.
+```
+
+Persistence: **Neon PostgreSQL** holds users, documents, analyses, predictions
+(JSONB columns for the flexible AI payloads). **ChromaDB** holds the question/topic
+vectors. Uploaded files live on disk (or `/tmp` on Vercel).
+
+---
+
+## 🧠 Why Exyst Is a RAG System
+
+RAG = **R**etrieval-**A**ugmented **G**eneration: instead of asking the model to
+generate from its parametric memory alone, you _retrieve_ relevant external knowledge
+at query time and _augment_ the prompt with it, so _generation_ is grounded in real
+data. Exyst implements all three explicitly:
+
+| RAG stage        | Where it happens in Exyst                                                             | Implementation                                                                                                                                                                                           |
+| ---------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Retrieval**    | `app/ai/rag.py` → `retrieve_similar_questions()`                                      | ChromaDB embeds every historical question into a vector space; at prediction time we run **cosine-similarity search** over the top topics and the course title to pull the most relevant past questions. |
+| **Augmentation** | `app/ai/pipelines/predictor.py` → `_format_rag_context()` + `_format_sample_papers()` | The retrieved questions **and** the verbatim past papers are injected into the generation prompt as grounding context.                                                                                   |
+| **Generation**   | `predictor.predict()`                                                                 | Gemini generates a new paper _conditioned on_ that retrieved/injected context — not from generic priors.                                                                                                 |
+
+**What specifically makes it RAG (not just "an LLM call"):**
+
+1. **A vector store is the knowledge base.** Questions are stored as embeddings in
+   ChromaDB, not as plain rows. Retrieval is _semantic_ — "rank correlation" matches
+   "Spearman's coefficient" even with no shared keywords.
+2. **Retrieval is query-time and selective.** We don't dump every past question into
+   the prompt; we retrieve the top-N most similar ones per topic and dedupe, keeping
+   the prompt small and on-topic.
+3. **Generation is grounded and attributable.** Each predicted question carries a
+   topic and a confidence score derived from how strongly the historical corpus
+   supports it. The evaluator's "historical alignment" factor measures exactly this.
+
+> Exyst is a **hybrid-grounded** generator: classic vector RAG (ChromaDB retrieval)
+> **plus** in-context grounding (the actual papers as a format template). The vector
+> layer generalizes _across_ papers (semantically similar questions from different
+> sessions); the in-context layer locks the _exact output format_. Together they fix
+> the two failure modes of a naive LLM: wrong content and wrong format.
+
+---
+
+## ⚡ Performance & Optimization (what's already done)
+
+The pipeline is deliberately **LLM-frugal** — only 3–4 model calls per full run:
+
+| Optimization                            | Effect                                                                                                                              |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| **Batched classification & extraction** | All pages classified in _one_ call; all papers' topics extracted in _one_ call — not N calls.                                       |
+| **Tiered model routing**                | Heavy generation uses `gemini-2.5-flash`; cheap structured tasks (classification, validation) use `flash-lite`/`gemma`.             |
+| **Model fallback + rotation**           | On 503/429/timeout the client rotates `flash → flash-lite → gemma` instead of hammering one model — resilient to provider overload. |
+| **Adaptive rate-limit tracking**        | Per-model RPM windows pick the least-loaded model first, preserving free-tier quotas.                                               |
+| **Prompt-level response cache**         | Identical prompts (TTL 1h) skip the API entirely.                                                                                   |
+| **Deterministic where possible**        | Frequencies, trends, marks math, and confidence are computed in Python — the LLM is used only where it adds value.                  |
+| **Async + background + SSE**            | FastAPI is fully async; long runs execute as background tasks with live SSE progress and a polling fallback.                        |
+| **Serverless-aware DB pooling**         | `NullPool` on Vercel/serverless avoids stale Neon connections; a real pool is used on long-lived hosts.                             |
+| **Content hashing**                     | Every upload is SHA-256 hashed — the hook for dedup/result-reuse is already in place.                                               |
+
+---
+
+## 📈 Scaling to 100,000 Users
+
+The codebase is **stateless at the API layer** and **schema-migrated** (Alembic), so
+horizontal scaling is mostly an infrastructure exercise. Honest bottlenecks first, then
+the path.
+
+### Current bottlenecks (single-instance assumptions)
+
+- **LLM provider quota** is the hard ceiling — free/standard Gemini tiers cap at a few
+  requests/minute. This, not CPU, limits throughput.
+- **Embedded ChromaDB** is a local on-disk store. It does not share across instances
+  and won't survive serverless cold starts.
+- **In-memory cache & rate limiter** live per-process — not shared across replicas.
+- **`BackgroundTasks`** run in the web process; they don't survive a restart, can't
+  retry, and don't load-balance.
+- **Local file storage** (`/tmp` on Vercel) is ephemeral and per-instance.
+
+### The path to 100k users
+
+| Concern                     | Change                                                                                                                                                                                                                              |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Throughput / LLM limits** | Move to a paid Gemini tier (or provisioned throughput) + a small key pool; queue generation so bursts smooth out. This is the #1 lever.                                                                                             |
+| **Compute**                 | Run the FastAPI app as N stateless replicas behind a load balancer / autoscaler (it already holds no local session state).                                                                                                          |
+| **Vector store**            | Replace embedded ChromaDB with a networked vector DB — **Chroma server, Qdrant, pgvector, or Pinecone** — shared by all replicas. Index **per course, once**, and reuse across every student of that course (huge win — see below). |
+| **Jobs**                    | Replace `BackgroundTasks` with a real queue (**Celery/RQ/Cloud Tasks**) + workers: durable, retryable, independently autoscaled, decoupled from the web tier.                                                                       |
+| **Shared state**            | Move the prompt cache + rate limiter to **Redis** so all replicas share quota accounting and cache hits.                                                                                                                            |
+| **Database**                | Neon scales reads via replicas; front it with **PgBouncer** for connection pooling at high concurrency.                                                                                                                             |
+| **File storage**            | Use **S3 / GCS** (object storage) instead of local disk for uploads.                                                                                                                                                                |
+| **Frontend**                | Already CDN-served on Vercel; static + edge-cached.                                                                                                                                                                                 |
+| **Result reuse**            | Cache analyses/predictions by **file hash** → identical/known papers return instantly with zero LLM cost.                                                                                                                           |
+
+### Why this scales cleanly
+
+Because the **expensive work is shared, not per-user.** 100k students of the same
+course upload the _same_ past papers → one cached analysis + one shared RAG index
+serves all of them. The per-user cost collapses to a cache lookup. The only genuinely
+per-user LLM cost is a _novel_ paper set, which the queue absorbs and the cache then
+remembers.
+
+---
+
+## ✅ Pros & ⚠️ Cons
+
+**Pros**
+
+- Clean, layered, fully-typed, fully-async backend; stateless and migration-ready.
+- Quota-frugal AI pipeline (3–4 calls) with provider-failure resilience built in.
+- Genuinely format-faithful output (replicates the real paper's structure & marks).
+- Hybrid grounding (vector RAG + in-context) → accurate content _and_ format.
+- Transparent confidence scoring; graceful degradation (fallback paper, never a crash).
+
+**Cons / current limits**
+
+- Throughput is bounded by the LLM provider's rate limits until you pay for higher tiers.
+- Embedded ChromaDB + in-memory cache/limiter must be externalized before multi-instance scale.
+- `BackgroundTasks` (not a real queue) is fine for moderate load, not for 100k.
+- Prediction quality depends on extraction quality for scanned/image-only PDFs (no OCR yet).
+- Single LLM provider (Gemini) — no cross-provider failover today.
+
+---
+
+## 🔧 Further Processing Optimizations (roadmap)
+
+- **Dedup by file hash** — skip the whole pipeline when an identical PDF (or a known
+  course's papers) was already processed; serve the cached result. _(hash already computed)_
+- **Per-course shared RAG index** — build one vector index per course and reuse it
+  for every student, instead of re-indexing per upload.
+- **Separate text input streams** — let users paste/upload syllabus and past papers
+  separately; removes the classification LLM call and its ambiguity entirely.
+- **Persistent embedding cache** — cache embeddings keyed by question text so
+  re-indexing is free.
+- **Parallel stage execution** — syllabus analysis and pattern analysis are
+  independent and can run concurrently.
+- **Streaming generation** — stream the predicted paper token-by-token to the UI for
+  perceived latency wins.
+- **OCR fallback** (Tesseract / a vision model) for scanned, image-only PDFs.
+- **Cross-provider failover** — add a non-Gemini backend to the fallback chain for
+  full provider independence.
+
+---
+
 ## 🛠 Tech Stack
 
 | Layer        | Technology                                                   |
@@ -111,7 +302,7 @@ PDF Upload
 ### Prerequisites
 
 - Python 3.11+ and Node.js 20+
-- A Google AI Studio API key ([get one here](https://aistudio.google.com/)) or Groq API key
+- A Google AI Studio API key ([get one here](https://aistudio.google.com/apikey))
 
 ### 1. Clone & configure
 
@@ -121,7 +312,7 @@ cd exyst_paper
 
 # Set up your environment
 cp backend/.env.example backend/.env
-# Edit backend/.env and add your GEMINI_API_KEY (or GROQ_API_KEY) and DATABASE_URL
+# Edit backend/.env and add your GEMINI_API_KEY and DATABASE_URL
 ```
 
 ### 2. Run locally
@@ -308,7 +499,7 @@ exyst/
 cd backend
 source venv/bin/activate
 
-# Run all 16 tests
+# Run the backend suite (54 tests)
 pytest tests/ -v
 
 # With coverage report
@@ -321,11 +512,21 @@ ruff check app/
 mypy app/ --ignore-missing-imports
 ```
 
-Test suites:
+Backend suites:
 
-- `test_api/` — Health endpoint, docs availability
-- `test_ai/test_pipelines.py` — Document processor, evaluator scoring
+- `test_api/test_auth.py` — register, login, refresh rotation, `/me`, invalid/expired tokens, rate-limit
+- `test_api/test_documents.py` — upload, list, get, validation, ownership isolation
+- `test_api/test_analysis.py` — 202 contract, background success/failure persistence, ownership
+- `test_api/test_predictions.py` — generate/get error contracts
+- `test_ai/test_pipelines.py` — document processor, classifier (mocked LLM), JSON parsing, evaluator
 - `test_ai/test_rag.py` — ChromaDB indexing, retrieval, idempotency
+
+Frontend tests (Vitest + React Testing Library):
+
+```bash
+cd frontend
+npm test     # API client: token refresh, 401-retry, error normalization
+```
 
 ---
 

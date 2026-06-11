@@ -33,8 +33,10 @@ class Settings(BaseSettings):
 
     # --- LLM (Google AI Studio / Gemini) ---
     GEMINI_API_KEY: str = ""
-    HF_TOKEN: str = ""
     DEFAULT_LLM_MODEL: str = "gemini-2.5-flash"
+    # Hard ceiling (seconds) on a single LLM call before it is treated as a
+    # retryable failure, so a hung request can't stall the pipeline forever.
+    LLM_TIMEOUT_SECONDS: float = 90.0
 
     # --- Database ---
     DATABASE_URL: str = "postgresql+asyncpg://exyst:exyst_password@localhost:5432/exyst_db"
@@ -51,9 +53,6 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-
-    # --- Redis ---
-    REDIS_URL: str = "redis://localhost:6379/0"
 
     # --- File Storage ---
     UPLOAD_DIR: str = "/tmp/uploads" if os.environ.get("VERCEL") else "uploads"

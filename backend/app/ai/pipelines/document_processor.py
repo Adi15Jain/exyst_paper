@@ -125,31 +125,48 @@ class DocumentProcessor:
                 sha256.update(chunk)
         return sha256.hexdigest()
 
+    # A paper boundary is an examination header (more reliable than a bare year, which
+    # can recur inside a paper). Falls back to a bare academic session if no header exists.
+    _EXAM_HEADER_RE = re.compile(
+        r"(?:(?:ODD|EVEN|Odd|Even)\s+)?Semester\s+Examination|"
+        r"(?:End\s+Term|Mid\s+Term)\s+Examination",
+        re.IGNORECASE,
+    )
+    _SESSION_RE = re.compile(
+        r"(?:20\d{2}[-–]\d{2})|(?:(?:May|Dec|Jan|Jun|Jul|Nov)\s+20\d{2})"
+    )
+
     def split_papers_by_session(self, text: str) -> list[dict[str, str]]:
         """
-        Split concatenated question paper text into individual papers by session year.
+        Split concatenated text into individual question papers.
 
-        Detects patterns like: 2023-24, 2024-25, May 2024, Dec 2023
+        Splits on examination-header markers (e.g. "ODD Semester Examination 2021-22")
+        when present, otherwise on bare academic-session markers. The full text of each
+        paper — not just the marker — is preserved.
         """
-        # Pattern to match academic sessions
-        session_pattern = r"((?:20\d{2}[-–]\d{2})|(?:(?:May|Dec|Jan|Jun|Jul|Nov)\s+20\d{2}))"
-        parts = re.split(f"({session_pattern})", text)
+        text = text or ""
+        if not text.strip():
+            return []
 
-        papers = []
-        i = 0
-        while i < len(parts):
-            if i + 1 < len(parts) and re.match(session_pattern, parts[i + 1]):
-                # Skip the pre-match text, take the session and content
-                session = parts[i + 1].strip()
-                content = parts[i + 2].strip() if i + 2 < len(parts) else ""
-                if content:
-                    papers.append({"session": session, "text": f"{session}\n{content}"})
-                i += 3
-            else:
-                i += 1
+        # Prefer exam-header boundaries; they delimit whole papers reliably.
+        boundaries = [m.start() for m in self._EXAM_HEADER_RE.finditer(text)]
+        if not boundaries:
+            boundaries = [m.start() for m in self._SESSION_RE.finditer(text)]
 
-        # If no sessions were found, treat entire text as one paper
-        if not papers and text.strip():
+        if not boundaries:
+            return [{"session": "Unknown", "text": text}]
+
+        papers: list[dict[str, str]] = []
+        for idx, start in enumerate(boundaries):
+            end = boundaries[idx + 1] if idx + 1 < len(boundaries) else len(text)
+            chunk = text[start:end].strip()
+            if len(chunk) < 50:  # skip stray markers with no real content
+                continue
+            session_match = self._SESSION_RE.search(chunk)
+            session = session_match.group(0).strip() if session_match else f"paper_{idx}"
+            papers.append({"session": session, "text": chunk})
+
+        if not papers:
             papers = [{"session": "Unknown", "text": text}]
 
         logger.info("papers_split", num_papers=len(papers))

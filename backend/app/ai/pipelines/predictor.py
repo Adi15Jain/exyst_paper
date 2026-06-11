@@ -15,58 +15,59 @@ from typing import Any
 from app.ai.llm_client import LLMClient
 from app.ai.pipelines.syllabus_analyzer import SyllabusStructure
 from app.core.logging import get_logger
-from app.schemas.prediction import PredictedPaper, PredictedSection
+from app.schemas.prediction import PredictedPaper
 
 logger = get_logger(__name__)
 
-PREDICTOR_SYSTEM_PROMPT = """You are an expert exam paper predictor for university examinations.
-Based on historical question papers, syllabus structure, and topic frequency patterns,
-you generate realistic predicted question papers.
+PREDICTOR_SYSTEM_PROMPT = """You are an expert exam paper setter for university examinations.
+
+You are given the ACTUAL past question papers for a course. Your job is to set a NEW
+question paper for the SAME course that a student could realistically sit next term.
 
 CRITICAL RULES:
-1. Return ONLY valid JSON matching the exact schema specified.
-2. Every question must be a complete, well-formed academic question.
-3. Cover topics proportionally based on their historical frequency.
-4. Maintain the exam format (sections, marks distribution) from historical papers.
-5. Include confidence scores (0-1) for each prediction.
-6. Never generate placeholder text like "Q" or empty questions."""
+1. Return ONLY valid JSON matching the exact schema specified — no markdown, no prose.
+2. REPLICATE THE FORMAT of the past papers exactly: the same sections, the same question
+   numbering scheme, the same number of questions, the same sub-part structure (a, b, ...),
+   the same per-question and per-part marks, the same internal-choice ("Or") structure, and
+   the same instructions/header style. The new paper must look like it came from the same
+   examiner and the same university.
+3. GENERATE NEW QUESTIONS on the SAME topics, scope, and difficulty as the past papers.
+   Do NOT copy any past question verbatim — rephrase, change numbers/datasets, or pick a
+   sibling concept from the same topic. Numerical problems must use different values.
+4. Stay strictly within the subject. Every question must clearly belong to this course —
+   never invent topics from unrelated subjects.
+5. The marks of all main questions MUST sum to exactly the paper's max marks.
+6. Never output placeholder text like "Q" or empty questions."""
 
-PREDICTOR_USER_PROMPT = """Generate a predicted question paper based on the following data.
+PREDICTOR_USER_PROMPT = """Set a new predicted question paper for this course.
 
-## Syllabus Structure
-Course: {course_title}
-Topics by unit:
-{topics_by_unit}
+## Course
+Subject: {course_title}
+Duration: {duration}
+Max marks: {max_marks}
 
-## Historical Topic Frequency (most common first)
+## ACTUAL PAST QUESTION PAPERS (replicate this exact format; do not copy questions verbatim)
+{sample_papers}
+
+## Topics seen across the past papers (cover these in similar proportion)
 {frequency_summary}
+Syllabus topics (if available): {topics_by_unit}
 
-## Topic Trends
-- Rising topics (appearing more recently): {rising_topics}
-- Falling topics (appearing less recently): {falling_topics}
-- Consistent topics (always appear): {consistent_topics}
-
-## Typical Question Format Pattern
-{typical_question_format}
-
-## Historical Paper Format
-- Number of papers analyzed: {num_papers}
-- Typical number of questions: {typical_num_questions}
-- Max marks: {max_marks}
-- Duration: {duration}
-
-## RAG-Retrieved Similar Historical Questions
+## Additional historical questions for reference (style/scope only)
 {rag_context}
 
 ---
 
-## Instructions
-1. The sections, question types (short/medium/long), counts, and marks distribution of the predicted paper MUST closely follow the "Typical Question Format Pattern" and typical question format from historical papers.
-2. The sum of total marks for all questions in the sections MUST equal {max_marks} exactly. For example, if max_marks is 60, make sure all questions' marks sum to 60.
-3. Use the RAG-retrieved similar questions as inspiration — the predicted questions should follow similar patterns, phrasing styles, and topic scopes, but NOT be exact duplicates.
-4. Prioritize rising and consistent topics. De-emphasize falling topics.
+## How to build the paper
+1. Mirror the past papers' structure EXACTLY — same sections, same question count, same
+   numbering (e.g. Q1 with parts a,b,c,...; Q2–Qn as full questions), same marks per question
+   and per part, and reproduce every internal "Or" choice where the originals have one.
+2. The sum of all main `marks` values MUST equal {max_marks} exactly. (An "Or" alternative is
+   a choice, not extra marks — do not add it to the total.)
+3. Reproduce the header instructions in the same style (e.g. "Attempt all questions").
+4. Write NEW questions on the same topics and difficulty; vary wording and numbers.
 
-Generate a complete predicted question paper as a JSON object with this EXACT structure:
+Return a JSON object with EXACTLY this structure:
 {{
     "paper_info": {{
         "title": "Predicted Question Paper",
@@ -75,34 +76,46 @@ Generate a complete predicted question paper as a JSON object with this EXACT st
         "duration": "{duration}",
         "max_marks": "{max_marks}",
         "date": "Predicted",
-        "instructions": ["Answer all questions", "..."]
+        "instructions": ["<reproduce the paper's instructions>"]
     }},
     "sections": [
         {{
-            "section_name": "Section A",
-            "title": "Short Answer Questions",
-            "description": "Answer any N questions",
+            "section_name": "<as in the source, e.g. 'Section A' or '' if the source has none>",
+            "title": "<e.g. 'Short Answer Questions' or ''>",
+            "description": "<e.g. 'Answer all questions'>",
             "questions": [
                 {{
                     "question_number": 1,
-                    "question_text": "Full question text here",
-                    "topic": "Topic name",
-                    "marks": 5,
+                    "question_text": "<lead-in text, or '' if the question is only sub-parts>",
+                    "topic": "<specific topic from THIS course>",
+                    "marks": 10,
                     "question_type": "short",
-                    "has_parts": false,
-                    "parts": [],
+                    "has_parts": true,
+                    "parts": [
+                        {{"label": "a", "question_text": "...", "marks": 2}},
+                        {{"label": "b", "question_text": "...", "marks": 2}}
+                    ],
+                    "or_choice": {{
+                        "question_text": "<the 'Or' alternative, or omit if none>",
+                        "parts": [{{"label": "a", "question_text": "...", "marks": 2}}]
+                    }},
                     "confidence": 0.8,
-                    "reasoning": "This topic appeared in 3 out of 4 papers"
+                    "reasoning": "Mirrors Q1 of the past papers; this topic recurs."
                 }}
             ],
-            "total_marks": 20
+            "total_marks": 60
         }}
     ],
-    "total_questions": 10,
+    "total_questions": 6,
     "topic_coverage": {{"Topic A": 0.9, "Topic B": 0.7}},
     "overall_confidence": 0.75
 }}
-"""
+
+Notes:
+- If a question has no sub-parts, set "has_parts": false, "parts": [], and put the full
+  question in "question_text".
+- Omit "or_choice" (or set it to null) when the source question offers no alternative.
+- `marks` on each main question = the total marks for that question (sum of its parts)."""
 
 VALIDATOR_SYSTEM_PROMPT = """You are a strict academic exam paper validator.
 You review predicted question papers for correctness and fix any issues.
@@ -145,6 +158,7 @@ class Predictor:
         frequency_data: dict[str, Any],
         metadata: dict[str, str | None],
         rag_context: list[dict[str, Any]] | None = None,
+        sample_papers: list[dict[str, Any]] | None = None,
     ) -> PredictedPaper:
         """
         Generate a predicted question paper.
@@ -152,8 +166,10 @@ class Predictor:
         Args:
             syllabus: Structured syllabus data.
             frequency_data: Topic frequency and pattern analysis.
-            metadata: Exam metadata (marks, duration, etc.)
+            metadata: Exam metadata (subject, marks, duration, etc.)
             rag_context: RAG-retrieved similar historical questions.
+            sample_papers: The actual past papers (dicts with 'session'/'text') used as the
+                authoritative format + content template.
 
         Returns:
             PredictedPaper with validated structure and confidence scores.
@@ -161,41 +177,31 @@ class Predictor:
         # Build context strings
         topics_by_unit = self._format_topics_by_unit(syllabus)
         frequency_summary = self._format_frequency(frequency_data)
-        patterns = frequency_data.get("patterns", {})
 
         # Determine next academic year
         current_year = datetime.now().year
         next_year = f"{current_year}-{str(current_year + 1)[2:]}"
 
-        # Format RAG context
+        # Format RAG context + the actual past papers (the primary grounding)
         rag_context_text = self._format_rag_context(rag_context or [])
+        sample_papers_text = self._format_sample_papers(sample_papers or [])
 
-        course_title = syllabus.course_title or metadata.get("subject", "Unknown Subject")
-        rising = ", ".join(patterns.get("rising_topics", [])) or "None detected"
-        falling = ", ".join(patterns.get("falling_topics", [])) or "None detected"
-        consistent = ", ".join(patterns.get("consistent_topics", [])) or "None detected"
-        num_papers = patterns.get("total_papers_analyzed", 0)
-
-        total_q = patterns.get("total_questions_found", 10)
-        total_p = max(patterns.get("total_papers_analyzed", 1), 1)
-        typical_q = total_q // total_p
-
+        course_title = (
+            metadata.get("subject")
+            or syllabus.course_title
+            or "Unknown Subject"
+        )
         max_marks = metadata.get("max_marks", "100")
 
         prompt = PREDICTOR_USER_PROMPT.format(
             course_title=course_title,
             topics_by_unit=topics_by_unit,
             frequency_summary=frequency_summary,
-            rising_topics=rising,
-            falling_topics=falling,
-            consistent_topics=consistent,
-            num_papers=num_papers,
-            typical_num_questions=typical_q,
             max_marks=max_marks,
             duration=metadata.get("duration", "3 Hours"),
-            typical_question_format=metadata.get("typical_format", "No typical format patterns detected."),
             next_year=next_year,
             rag_context=rag_context_text,
+            sample_papers=sample_papers_text,
         )
 
         try:
@@ -346,6 +352,23 @@ class Predictor:
             )
         return "\n".join(lines)
 
+    def _format_sample_papers(self, sample_papers: list[dict[str, Any]]) -> str:
+        """
+        Format the actual past papers verbatim so the LLM can replicate their format.
+
+        These are the primary grounding for both the paper structure and the topics.
+        """
+        if not sample_papers:
+            return "No past papers available — infer a standard format."
+
+        # Use up to 2 papers; cap each so the prompt stays within token limits.
+        lines = []
+        for i, paper in enumerate(sample_papers[:2], 1):
+            text = (paper.get("text") or "").strip()[:4000]
+            session = paper.get("session", "")
+            lines.append(f"----- PAST PAPER {i} (session: {session}) -----\n{text}")
+        return "\n\n".join(lines)
+
     def _format_rag_context(self, rag_questions: list[dict[str, Any]]) -> str:
         """Format RAG-retrieved questions for prompt context."""
         if not rag_questions:
@@ -374,7 +397,7 @@ class Predictor:
         return PredictedPaper(
             paper_info={
                 "title": "Predicted Question Paper",
-                "subject": syllabus.course_title or metadata.get("subject", "Unknown"),
+                "subject": metadata.get("subject") or syllabus.course_title or "Unknown",
                 "academic_year": f"{current_year}-{str(current_year + 1)[2:]}",
                 "duration": metadata.get("duration", "3 Hours"),
                 "max_marks": metadata.get("max_marks", "100"),

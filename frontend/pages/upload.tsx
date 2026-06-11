@@ -11,8 +11,12 @@ import { useAuth } from "@/lib/auth-context";
 import {
     documents,
     pipeline,
+    analysis as analysisApi,
+    predictions as predictionsApi,
     PipelineEvent,
 } from "@/lib/api";
+
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50MB — matches the backend limit
 
 type PipelineStage =
     | "idle"
@@ -65,21 +69,82 @@ export default function UploadPage() {
         else if (e.type === "dragleave") setDragActive(false);
     }, []);
 
-    const handleDrop = useCallback((e: React.DragEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setDragActive(false);
-        if (e.dataTransfer.files?.[0]) {
-            setFile(e.dataTransfer.files[0]);
-            setError("");
+    const selectFile = useCallback((candidate: File) => {
+        if (!candidate.name.toLowerCase().endsWith(".pdf")) {
+            setFile(null);
+            setError("Only PDF files are accepted.");
+            return;
         }
+        if (candidate.size > MAX_UPLOAD_BYTES) {
+            setFile(null);
+            setError(
+                `File is ${(candidate.size / 1024 / 1024).toFixed(1)}MB — the maximum is 50MB.`,
+            );
+            return;
+        }
+        setFile(candidate);
+        setError("");
     }, []);
+
+    const handleDrop = useCallback(
+        (e: React.DragEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragActive(false);
+            if (e.dataTransfer.files?.[0]) {
+                selectFile(e.dataTransfer.files[0]);
+            }
+        },
+        [selectFile],
+    );
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files?.[0]) {
-            setFile(e.target.files[0]);
-            setError("");
+            selectFile(e.target.files[0]);
         }
+    };
+
+    const finishAndRedirect = (docId: string, delayMs = 2000) => {
+        setStage("complete");
+        setProgress(100);
+        setTimeout(() => {
+            router.push(`/documents/${docId}`);
+        }, delayMs);
+    };
+
+    /**
+     * Fallback when the live SSE stream drops mid-run: the connection is gone,
+     * but the work can still run server-side. Kick off the background analysis
+     * (REST), poll until it finishes, then generate the prediction.
+     */
+    const runViaPolling = async (docId: string) => {
+        setCurrentStage("reconnecting");
+        setCurrentDetail("Live connection lost — finishing in the background...");
+
+        await analysisApi.run(docId);
+
+        // Poll status for up to ~5 minutes.
+        const maxAttempts = 100;
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            await new Promise((r) => setTimeout(r, 3000));
+            const status = await analysisApi.status(docId);
+            setProgress(Math.min(40 + attempt * 2, 70));
+            setCurrentDetail(`Analyzing in the background (${status.status})...`);
+            if (status.status === "completed") break;
+            if (status.status === "failed") {
+                throw new Error(status.error_message || "Analysis failed.");
+            }
+            if (attempt === maxAttempts - 1) {
+                throw new Error("Analysis timed out. Please try again.");
+            }
+        }
+
+        setCurrentStage("predicting");
+        setCurrentDetail("Generating predicted paper...");
+        setProgress(85);
+        await predictionsApi.generate(docId);
+
+        finishAndRedirect(docId);
     };
 
     const handleSubmit = async () => {
@@ -91,6 +156,8 @@ export default function UploadPage() {
         setCompletionData(null);
         startTimeRef.current = Date.now();
 
+        let docId: string | null = null;
+
         try {
             // Stage 1: Upload
             setStage("uploading");
@@ -99,12 +166,15 @@ export default function UploadPage() {
             setProgress(5);
 
             const doc = await documents.upload(file);
+            docId = doc.id;
 
             // Stage 2: Stream analysis + prediction
             setStage("streaming");
             setProgress(8);
 
             let lastStageTime = Date.now();
+            let completed = false;
+            let pipelineErrored = false;
 
             await pipeline.runStream(doc.id, (event: PipelineEvent) => {
                 const now = Date.now();
@@ -137,31 +207,40 @@ export default function UploadPage() {
 
                     lastStageTime = now;
                 } else if (event.event === "complete") {
+                    completed = true;
                     setCompletionData(event.data);
-                    setStage("complete");
-                    setProgress(100);
                     setCurrentDetail("Pipeline complete!");
                     setCurrentStage("complete");
-
-                    // Navigate to results
-                    setTimeout(() => {
-                        router.push(`/documents/${doc.id}`);
-                    }, 2000);
+                    finishAndRedirect(doc.id);
                 } else if (event.event === "error") {
+                    pipelineErrored = true;
                     setStage("error");
                     setError(event.data.error || "Pipeline failed");
                 }
             });
 
-            // If stream ended without complete event
-            if (stage !== "complete" && stage !== "error") {
-                setStage("complete");
-                setProgress(100);
-                setTimeout(() => {
-                    router.push(`/documents/${doc.id}`);
-                }, 2000);
+            // Stream ended without a terminal event (connection dropped mid-run):
+            // fall back to the background pipeline + polling.
+            if (!completed && !pipelineErrored) {
+                await runViaPolling(doc.id);
             }
         } catch (err) {
+            // A genuine connection failure — try the background fallback before
+            // giving up, since the upload itself may have succeeded.
+            if (docId) {
+                try {
+                    await runViaPolling(docId);
+                    return;
+                } catch (fallbackErr) {
+                    setStage("error");
+                    setError(
+                        fallbackErr instanceof Error
+                            ? fallbackErr.message
+                            : "Pipeline failed",
+                    );
+                    return;
+                }
+            }
             setStage("error");
             setError(err instanceof Error ? err.message : "Pipeline failed");
         }

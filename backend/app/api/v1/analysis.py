@@ -26,12 +26,23 @@ async def run_analysis(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Trigger analysis pipeline for a document.
+    Trigger the analysis pipeline for a document.
 
-    The analysis runs synchronously for now (will be moved to background tasks).
-    Returns immediately with status.
+    Creates a PROCESSING analysis record, schedules the pipeline to run in the
+    background, and returns 202 immediately. Poll ``GET /analysis/{id}/status``
+    for progress.
     """
-    analysis = await analysis_service.run_analysis(document_id, user_id, db)
+    analysis = await analysis_service.create_pending_analysis(document_id, user_id, db)
+    # Commit before the response so the background task (which opens its own
+    # session) can see the PROCESSING record.
+    await db.commit()
+
+    background_tasks.add_task(
+        analysis_service.run_analysis_background,
+        document_id,
+        user_id,
+        analysis.id,
+    )
 
     return AnalysisStatusResponse(
         id=analysis.id,

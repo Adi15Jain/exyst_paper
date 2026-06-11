@@ -21,11 +21,15 @@ from app.core.middleware import register_middleware
 async def lifespan(app: FastAPI):
     """Application lifespan — startup and shutdown events."""
     # --- Startup ---
+    settings = get_settings()
     from app.db.session import engine
     from app.models import Base
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # In dev/test we auto-create tables for convenience. In production the schema
+    # is owned by Alembic — run `alembic upgrade head` as a deploy step instead.
+    if settings.DEBUG:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
     yield
 

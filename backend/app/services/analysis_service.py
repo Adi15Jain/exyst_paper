@@ -27,6 +27,7 @@ from app.ai.rag import RAGPipeline
 from app.config import get_settings
 from app.core.exceptions import AnalysisError, DocumentNotFoundError
 from app.core.logging import get_logger
+from app.db.session import async_session_factory
 from app.models import Analysis, Document, ProcessingStatus
 
 logger = get_logger(__name__)
@@ -45,6 +46,89 @@ class AnalysisService:
         self.pattern_analyzer = PatternAnalyzer()
         self.settings = get_settings()
 
+    async def _get_document(
+        self, document_id: UUID, user_id: UUID, db: AsyncSession
+    ) -> Document | None:
+        """Fetch a document owned by the given user."""
+        stmt = select(Document).where(
+            Document.id == document_id,
+            Document.user_id == user_id,
+        )
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def create_pending_analysis(
+        self,
+        document_id: UUID,
+        user_id: UUID,
+        db: AsyncSession,
+    ) -> Analysis:
+        """
+        Create a PROCESSING analysis record without running the pipeline.
+
+        Used by the background-task flow so a status poll immediately finds a
+        PROCESSING record before the pipeline (which runs in a separate session)
+        has produced any results.
+        """
+        document = await self._get_document(document_id, user_id, db)
+        if not document:
+            raise DocumentNotFoundError(str(document_id))
+
+        analysis = Analysis(
+            document_id=document.id,
+            status=ProcessingStatus.PROCESSING,
+            model_used=self.settings.DEFAULT_LLM_MODEL,
+        )
+        db.add(analysis)
+        document.status = ProcessingStatus.PROCESSING
+        await db.flush()
+        return analysis
+
+    async def run_analysis_background(
+        self,
+        document_id: UUID,
+        user_id: UUID,
+        analysis_id: UUID,
+    ) -> None:
+        """
+        Run the pipeline for an already-created analysis in its own DB session.
+
+        Scheduled via FastAPI BackgroundTasks after the request session has been
+        committed and closed, so it must open and own its own session. On failure
+        the analysis/document rows are persisted as FAILED.
+        """
+        async with async_session_factory() as session:
+            analysis = await session.get(Analysis, analysis_id)
+            document = await session.get(Document, document_id)
+            if analysis is None or document is None:
+                logger.error(
+                    "background_analysis_records_missing",
+                    analysis_id=str(analysis_id),
+                    document_id=str(document_id),
+                )
+                return
+
+            try:
+                await self._run_pipeline(analysis, document)
+                await session.commit()
+            except Exception as e:
+                # Persist the FAILED state in a clean transaction.
+                await session.rollback()
+                analysis = await session.get(Analysis, analysis_id)
+                document = await session.get(Document, document_id)
+                if analysis is not None:
+                    analysis.status = ProcessingStatus.FAILED
+                    analysis.error_message = str(e)[:2000]
+                if document is not None:
+                    document.status = ProcessingStatus.FAILED
+                    document.error_message = str(e)[:2000]
+                await session.commit()
+                logger.error(
+                    "background_analysis_failed",
+                    document_id=str(document_id),
+                    error=str(e),
+                )
+
     async def run_analysis(
         self,
         document_id: UUID,
@@ -53,7 +137,9 @@ class AnalysisService:
         progress_callback: ProgressCallback = None,
     ) -> Analysis:
         """
-        Run the full analysis pipeline on a document.
+        Run the full analysis pipeline on a document within the caller's session.
+
+        Used by the SSE streaming pipeline, which commits the session itself.
 
         Pipeline stages:
         1. Extract text from PDF
@@ -62,29 +148,11 @@ class AnalysisService:
         4. Analyze question paper patterns and frequency
         5. Index extracted data into RAG vector store
 
-        Args:
-            document_id: The document to analyze.
-            user_id: Owner of the document.
-            db: Database session.
-            progress_callback: Optional callback(stage, progress_pct, detail) for SSE streaming.
-
         Returns:
             Analysis ORM object with results.
         """
-        start_time = time.perf_counter()
-
-        async def _emit(stage: str, progress: int, detail: str) -> None:
-            if progress_callback:
-                await progress_callback(stage, progress, detail)
-
         # 1. Get document
-        stmt = select(Document).where(
-            Document.id == document_id,
-            Document.user_id == user_id,
-        )
-        result = await db.execute(stmt)
-        document = result.scalar_one_or_none()
-
+        document = await self._get_document(document_id, user_id, db)
         if not document:
             raise DocumentNotFoundError(str(document_id))
 
@@ -96,9 +164,29 @@ class AnalysisService:
         )
         db.add(analysis)
         await db.flush()
-
-        # Update document status
         document.status = ProcessingStatus.PROCESSING
+
+        await self._run_pipeline(analysis, document, progress_callback)
+        return analysis
+
+    async def _run_pipeline(
+        self,
+        analysis: Analysis,
+        document: Document,
+        progress_callback: ProgressCallback = None,
+    ) -> Analysis:
+        """
+        Execute the analysis pipeline against existing analysis/document rows.
+
+        On failure the rows are marked FAILED on the in-memory objects and an
+        AnalysisError is raised; callers are responsible for persisting state.
+        """
+        start_time = time.perf_counter()
+        document_id = document.id
+
+        async def _emit(stage: str, progress: int, detail: str) -> None:
+            if progress_callback:
+                await progress_callback(stage, progress, detail)
 
         try:
             # 2. Extract text from PDF

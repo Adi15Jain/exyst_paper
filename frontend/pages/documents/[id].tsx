@@ -33,10 +33,12 @@ export default function DocumentDetailPage() {
     >("prediction");
     const [loading, setLoading] = useState(true);
     const [regenerating, setRegenerating] = useState(false);
+    const [actionError, setActionError] = useState("");
 
     const handleRegenerate = async () => {
         if (!id) return;
         setRegenerating(true);
+        setActionError("");
         try {
             const docId = id as string;
             const newPred = await predictionsApi.generate(docId);
@@ -46,7 +48,7 @@ export default function DocumentDetailPage() {
                 .catch(() => null);
             if (topicFreq) setTopicData(topicFreq);
         } catch (err) {
-            alert(
+            setActionError(
                 err instanceof Error
                     ? err.message
                     : "Failed to generate prediction",
@@ -108,6 +110,41 @@ export default function DocumentDetailPage() {
             </Head>
 
             <AppLayout title={doc?.original_filename || "Document Detail"}>
+                {actionError && (
+                    <div
+                        role="alert"
+                        style={{
+                            marginBottom: 20,
+                            padding: "12px 16px",
+                            borderRadius: "var(--radius-sm)",
+                            background: "rgba(239, 68, 68, 0.1)",
+                            border: "1px solid rgba(239, 68, 68, 0.2)",
+                            color: "#ef4444",
+                            fontSize: "0.85rem",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: 12,
+                        }}
+                    >
+                        <span>{actionError}</span>
+                        <button
+                            onClick={() => setActionError("")}
+                            style={{
+                                background: "none",
+                                border: "none",
+                                color: "#ef4444",
+                                cursor: "pointer",
+                                fontSize: "1rem",
+                                lineHeight: 1,
+                            }}
+                            aria-label="Dismiss error"
+                        >
+                            ✕
+                        </button>
+                    </div>
+                )}
+
                 {/* Summary Bar */}
                 <div
                     style={{
@@ -470,6 +507,80 @@ export default function DocumentDetailPage() {
                                                                             }
                                                                         </span>
                                                                     )}
+                                                                    {q.parts &&
+                                                                        q.parts
+                                                                            .length >
+                                                                            0 && (
+                                                                            <QuestionParts
+                                                                                parts={
+                                                                                    q.parts
+                                                                                }
+                                                                            />
+                                                                        )}
+                                                                    {q.or_choice &&
+                                                                        (q.or_choice
+                                                                            .question_text ||
+                                                                            (q
+                                                                                .or_choice
+                                                                                .parts &&
+                                                                                q
+                                                                                    .or_choice
+                                                                                    .parts
+                                                                                    .length >
+                                                                                    0)) && (
+                                                                            <div
+                                                                                style={{
+                                                                                    marginTop: 8,
+                                                                                }}
+                                                                            >
+                                                                                <span
+                                                                                    style={{
+                                                                                        fontSize:
+                                                                                            "0.7rem",
+                                                                                        fontWeight: 700,
+                                                                                        color: "var(--text-muted)",
+                                                                                        letterSpacing:
+                                                                                            "0.05em",
+                                                                                    }}
+                                                                                >
+                                                                                    — OR —
+                                                                                </span>
+                                                                                {q
+                                                                                    .or_choice
+                                                                                    .question_text && (
+                                                                                    <p
+                                                                                        style={{
+                                                                                            margin: "4px 0 0",
+                                                                                            fontSize:
+                                                                                                "0.85rem",
+                                                                                            lineHeight: 1.5,
+                                                                                        }}
+                                                                                    >
+                                                                                        {
+                                                                                            q
+                                                                                                .or_choice
+                                                                                                .question_text
+                                                                                        }
+                                                                                    </p>
+                                                                                )}
+                                                                                {q
+                                                                                    .or_choice
+                                                                                    .parts &&
+                                                                                    q
+                                                                                        .or_choice
+                                                                                        .parts
+                                                                                        .length >
+                                                                                        0 && (
+                                                                                        <QuestionParts
+                                                                                            parts={
+                                                                                                q
+                                                                                                    .or_choice
+                                                                                                    .parts
+                                                                                            }
+                                                                                        />
+                                                                                    )}
+                                                                            </div>
+                                                                        )}
                                                                 </div>
                                                                 <div
                                                                     style={{
@@ -879,6 +990,44 @@ export default function DocumentDetailPage() {
 }
 
 // --- Helper Components ---
+
+function QuestionParts({ parts }: { parts: any[] }) {
+    return (
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+            {parts.map((pt: any, i: number) => (
+                <div
+                    key={i}
+                    style={{
+                        display: "flex",
+                        gap: 8,
+                        fontSize: "0.82rem",
+                        lineHeight: 1.5,
+                        color: "var(--text-secondary)",
+                    }}
+                >
+                    {pt.label && (
+                        <span style={{ fontWeight: 600, flexShrink: 0 }}>
+                            {pt.label})
+                        </span>
+                    )}
+                    <span style={{ flex: 1 }}>{pt.question_text}</span>
+                    {pt.marks ? (
+                        <span
+                            style={{
+                                flexShrink: 0,
+                                fontSize: "0.7rem",
+                                color: "var(--text-muted)",
+                                fontFamily: "monospace",
+                            }}
+                        >
+                            [{pt.marks}]
+                        </span>
+                    ) : null}
+                </div>
+            ))}
+        </div>
+    );
+}
 
 function MiniStat({
     label,

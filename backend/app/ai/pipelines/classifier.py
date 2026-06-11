@@ -4,7 +4,6 @@ Document classifier — determines whether a page is from a syllabus or question
 Uses LLM classification with batch processing for speed and quota efficiency.
 """
 
-from typing import Literal
 
 from app.ai.llm_client import LLMClient
 from app.core.logging import get_logger

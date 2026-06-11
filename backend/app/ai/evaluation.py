@@ -295,8 +295,6 @@ class Evaluator:
         Compares the distribution of question types and their marks
         against what was observed in historical papers.
         """
-        patterns = frequency_data.get("patterns", {})
-
         # Get predicted marks distribution
         predicted_marks: list[int] = []
         predicted_types: list[str] = []

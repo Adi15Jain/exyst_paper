@@ -47,6 +47,21 @@ class InvalidTokenError(AuthenticationError):
         super().__init__(message=message)
 
 
+class RateLimitError(ExystBaseError):
+    """Raised when a client exceeds an endpoint's request rate limit."""
+
+    def __init__(
+        self,
+        message: str = "Too many requests. Please try again later.",
+        retry_after: int = 60,
+    ):
+        super().__init__(
+            message=message,
+            status_code=429,
+            details={"retry_after": retry_after},
+        )
+
+
 # --- Document Errors ---
 
 

@@ -51,7 +51,7 @@ jobs:
         working-directory: ./backend
         env:
           DATABASE_URL: postgresql+asyncpg://exyst:test_password@localhost:5432/exyst_test
-          GROQ_API_KEY: test_key
+          GEMINI_API_KEY: test_key
           JWT_SECRET_KEY: test_secret_key_for_ci
           DEBUG: true
         run: pytest tests/ -v --cov=app --cov-report=term-missing
@@ -77,6 +77,10 @@ jobs:
         run: npm run lint
         continue-on-error: true
 
+      - name: Test
+        working-directory: ./frontend
+        run: npm test
+
       - name: Build
         working-directory: ./frontend
         run: npm run build
@@ -95,6 +99,6 @@ jobs:
 
       - name: Verify containers start
         run: |
-          docker compose up -d postgres redis
+          docker compose up -d postgres
           sleep 5
           docker compose ps

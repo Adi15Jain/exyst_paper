@@ -20,6 +20,8 @@ export default function DashboardPage() {
     const [stats, setStats] = useState<OverviewStats | null>(null);
     const [recentDocs, setRecentDocs] = useState<DocumentData[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState(false);
+    const [reloadKey, setReloadKey] = useState(0);
 
     useEffect(() => {
         if (authLoading) return;
@@ -28,15 +30,20 @@ export default function DashboardPage() {
             return;
         }
 
+        setLoading(true);
+        setLoadError(false);
+
         Promise.all([
             analyticsApi.overview().catch(() => null),
             documentsApi.list(1, 5).catch(() => null),
         ]).then(([statsData, docsData]) => {
             if (statsData) setStats(statsData);
             if (docsData) setRecentDocs(docsData.documents);
+            // Both failing means the backend is unreachable, not just empty data.
+            if (!statsData && !docsData) setLoadError(true);
             setLoading(false);
         });
-    }, [user, authLoading, router]);
+    }, [user, authLoading, router, reloadKey]);
 
     if (authLoading || !user) return null;
 
@@ -51,6 +58,41 @@ export default function DashboardPage() {
             </Head>
 
             <AppLayout title="Dashboard">
+                {loadError && (
+                    <div
+                        role="alert"
+                        style={{
+                            marginBottom: 24,
+                            padding: "12px 16px",
+                            borderRadius: "var(--radius-sm)",
+                            background: "rgba(239, 68, 68, 0.1)",
+                            border: "1px solid rgba(239, 68, 68, 0.2)",
+                            color: "#ef4444",
+                            fontSize: "0.85rem",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: 12,
+                        }}
+                    >
+                        <span>Couldn&apos;t load your dashboard data. The server may be unavailable.</span>
+                        <button
+                            onClick={() => setReloadKey((k) => k + 1)}
+                            style={{
+                                background: "rgba(239, 68, 68, 0.15)",
+                                border: "1px solid rgba(239, 68, 68, 0.3)",
+                                color: "#ef4444",
+                                cursor: "pointer",
+                                fontSize: "0.8rem",
+                                padding: "4px 12px",
+                                borderRadius: "var(--radius-sm)",
+                            }}
+                        >
+                            Retry
+                        </button>
+                    </div>
+                )}
+
                 {/* Welcome Section */}
                 <div className="animate-fade-in" style={{ marginBottom: 32 }}>
                     <h1
