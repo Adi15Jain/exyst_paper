@@ -21,6 +21,27 @@ def event_loop() -> Generator:
     loop.close()
 
 
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def _create_schema() -> AsyncGenerator[None, None]:
+    """
+    Create all database tables once for the test session, then drop them.
+
+    The app only creates tables in its FastAPI lifespan startup handler, but the
+    httpx ASGITransport used by the `client` fixture does not run lifespan
+    (startup/shutdown) events. Without this, every DB-backed endpoint 500s with
+    "no such table" / "relation does not exist".
+    """
+    from app.db.session import engine
+    from app.models import Base
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+    await engine.dispose()
+
+
 @pytest.fixture(autouse=True)
 def _reset_rate_limits() -> Generator:
     """
