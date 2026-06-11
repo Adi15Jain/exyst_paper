@@ -34,20 +34,3 @@ async def get_current_user_id(
         raise
     except Exception as e:
         raise AuthenticationError(f"Invalid authorization: {str(e)}")
-
-
-async def get_optional_user_id(
-    credentials: HTTPAuthorizationCredentials | None = Depends(security_scheme),
-) -> UUID | None:
-    """
-    Optionally extract user ID — returns None if no token provided.
-    Useful for endpoints that work both authenticated and unauthenticated.
-    """
-    if not credentials:
-        return None
-
-    try:
-        user_id_str = verify_access_token(credentials.credentials)
-        return UUID(user_id_str)
-    except Exception:
-        return None

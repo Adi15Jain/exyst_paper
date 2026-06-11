@@ -33,13 +33,6 @@ class AuthenticationError(ExystBaseError):
         super().__init__(message=message, status_code=401)
 
 
-class AuthorizationError(ExystBaseError):
-    """Raised when a user lacks permission."""
-
-    def __init__(self, message: str = "Insufficient permissions"):
-        super().__init__(message=message, status_code=403)
-
-
 class InvalidTokenError(AuthenticationError):
     """Raised when a JWT token is invalid or expired."""
 
@@ -127,13 +120,6 @@ class LLMOutputParsingError(AIError):
         )
 
 
-class ClassificationError(AIError):
-    """Raised when document classification fails."""
-
-    def __init__(self, message: str = "Document classification failed"):
-        super().__init__(message=message)
-
-
 # --- Analysis / Prediction Errors ---
 
 
@@ -152,13 +138,6 @@ class PredictionError(ExystBaseError):
 
 
 # --- Database Errors ---
-
-
-class DatabaseError(ExystBaseError):
-    """Raised when a database operation fails."""
-
-    def __init__(self, message: str = "Database operation failed"):
-        super().__init__(message=message, status_code=500)
 
 
 class NotFoundError(ExystBaseError):

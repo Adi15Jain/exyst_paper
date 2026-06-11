@@ -6,9 +6,7 @@ These Pydantic models serve dual purpose:
 2. LLM structured output enforcement (reduces parse failures)
 """
 
-from datetime import datetime
 from typing import Any, Literal
-from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -104,24 +102,3 @@ class ConfidenceReport(BaseModel):
         description="How well marks distribution matches historical patterns"
     )
     per_question_confidence: list[dict[str, Any]] = []
-
-
-class PredictionResponse(BaseModel):
-    """Full prediction response for the API."""
-    id: UUID
-    analysis_id: UUID
-
-    # The predicted paper
-    predicted_paper: PredictedPaper
-
-    # Quality metrics
-    confidence: ConfidenceReport
-    topic_coverage: dict[str, float] = {}
-
-    # Metadata
-    model_used: str | None = None
-    prompt_version: str | None = None
-    generation_time_seconds: float | None = None
-    generated_at: datetime
-
-    model_config = {"from_attributes": True}

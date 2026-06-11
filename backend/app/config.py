@@ -8,8 +8,10 @@ This ensures no secrets are hardcoded and configuration is validated at startup.
 import os
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_PLACEHOLDER_JWT_SECRET = "change-this-to-a-random-64-char-hex-string"
 
 
 class Settings(BaseSettings):
@@ -49,7 +51,7 @@ class Settings(BaseSettings):
         return v
 
     # --- JWT Auth ---
-    JWT_SECRET_KEY: str = "change-this-to-a-random-64-char-hex-string"
+    JWT_SECRET_KEY: str = _PLACEHOLDER_JWT_SECRET
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -71,6 +73,29 @@ class Settings(BaseSettings):
     def database_url_sync(self) -> str:
         """Sync database URL for Alembic migrations."""
         return self.DATABASE_URL.replace("+asyncpg", "+psycopg2")
+
+    @model_validator(mode="after")
+    def _validate_security(self) -> "Settings":
+        """
+        Fail fast on insecure production config.
+
+        A wildcard CORS origin combined with credentialed requests is never
+        valid, and shipping the placeholder JWT secret outside DEBUG would let
+        anyone forge tokens for any user. Both are allowed only in DEBUG so
+        local development stays frictionless.
+        """
+        if "*" in self.CORS_ORIGINS:
+            raise ValueError(
+                "CORS_ORIGINS must not contain '*' (credentials are enabled); "
+                "list explicit origins instead."
+            )
+        if not self.DEBUG and self.JWT_SECRET_KEY == _PLACEHOLDER_JWT_SECRET:
+            raise ValueError(
+                "JWT_SECRET_KEY is still the placeholder default. Set a strong "
+                "random secret, e.g. `python -c \"import secrets; "
+                "print(secrets.token_hex(32))\"`."
+            )
+        return self
 
 
 @lru_cache

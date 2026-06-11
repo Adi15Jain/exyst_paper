@@ -22,7 +22,6 @@ from .prediction import (
     ConfidenceReport,
     PredictedPaper,
     PredictedQuestion,
-    PredictionResponse,
 )
 
 __all__ = [
@@ -36,7 +35,6 @@ __all__ = [
     "AnalysisResponse",
     "AnalysisStatusResponse",
     "TopicFrequency",
-    "PredictionResponse",
     "PredictedQuestion",
     "PredictedPaper",
     "ConfidenceReport",

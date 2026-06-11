@@ -451,23 +451,3 @@ class LLMClient:
             response_format={"type": "json_object"},
         )
         return response.parse_json()
-
-    async def complete_structured(
-        self,
-        prompt: str,
-        output_model: type[BaseModel],
-        system_prompt: str | None = None,
-        temperature: float = 0.2,
-    ) -> BaseModel:
-        """
-        Complete and parse into a Pydantic model.
-
-        Returns a validated Pydantic instance. Raises LLMOutputParsingError on failure.
-        """
-        response = await self.complete(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=temperature,
-            response_format={"type": "json_object"},
-        )
-        return response.parse_as(output_model)
