@@ -305,15 +305,6 @@ export const analytics = {
         apiFetch<TopicFrequencyData>(
             `/analytics/topic-frequency/${documentId}`,
         ),
-
-    confidenceBreakdown: (documentId: string) =>
-        apiFetch<any>(`/analytics/confidence-breakdown/${documentId}`),
-};
-
-// --- Health ---
-
-export const health = {
-    check: () => apiFetch<any>("/health"),
 };
 
 // --- Pipeline Streaming API (SSE) ---

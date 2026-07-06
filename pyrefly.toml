@@ -1,4 +1,0 @@
-python_interpreter = "backend/venv/bin/python"
-python-interpreter-path = "backend/venv/bin/python"
-project-includes = ["backend/app/**/*.py"]
-project-excludes = ["backend/venv/**", "node_modules/**", ".next/**"]

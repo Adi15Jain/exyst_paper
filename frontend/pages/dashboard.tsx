@@ -19,7 +19,6 @@ export default function DashboardPage() {
     const { user, loading: authLoading } = useAuth();
     const [stats, setStats] = useState<OverviewStats | null>(null);
     const [recentDocs, setRecentDocs] = useState<DocumentData[]>([]);
-    const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState(false);
     const [reloadKey, setReloadKey] = useState(0);
 
@@ -30,7 +29,6 @@ export default function DashboardPage() {
             return;
         }
 
-        setLoading(true);
         setLoadError(false);
 
         Promise.all([
@@ -41,7 +39,6 @@ export default function DashboardPage() {
             if (docsData) setRecentDocs(docsData.documents);
             // Both failing means the backend is unreachable, not just empty data.
             if (!statsData && !docsData) setLoadError(true);
-            setLoading(false);
         });
     }, [user, authLoading, router, reloadKey]);
 

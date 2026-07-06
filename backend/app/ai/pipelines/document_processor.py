@@ -8,7 +8,6 @@ Handles PDF text extraction with multi-strategy fallback:
 Also extracts metadata (year, course code, marks) from the text.
 """
 
-import hashlib
 import re
 
 from pdfminer.high_level import extract_pages
@@ -116,14 +115,6 @@ class DocumentProcessor:
 
         logger.info("metadata_extracted", **{k: v for k, v in metadata.items() if v})
         return metadata
-
-    def compute_file_hash(self, file_path: str) -> str:
-        """Compute SHA-256 hash of a file for deduplication."""
-        sha256 = hashlib.sha256()
-        with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                sha256.update(chunk)
-        return sha256.hexdigest()
 
     # A paper boundary is an examination header (more reliable than a bare year, which
     # can recur inside a paper). Falls back to a bare academic session if no header exists.

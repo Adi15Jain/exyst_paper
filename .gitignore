@@ -11,3 +11,13 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Node
+node_modules/
+.next/

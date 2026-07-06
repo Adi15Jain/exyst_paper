@@ -53,9 +53,15 @@ class DocumentService:
         if len(file_content) == 0:
             raise DocumentUploadError("Empty file uploaded")
 
-        # Save file
+        # Validate the bytes are actually a PDF, not just a .pdf extension.
+        if not file_content.startswith(b"%PDF-"):
+            raise DocumentUploadError("File is not a valid PDF")
+
+        # Save file. Strip any directory components from the client-supplied
+        # filename so embedded "../" sequences can't escape the upload dir.
         timestamp = int(time.time())
-        safe_name = filename.replace(" ", "_")
+        base_name = os.path.basename(filename).replace(" ", "_")
+        safe_name = base_name.lstrip(".") or "upload.pdf"
         stored_filename = f"{timestamp}_{safe_name}"
 
         # Create user-specific directory
@@ -63,6 +69,12 @@ class DocumentService:
         os.makedirs(user_dir, exist_ok=True)
 
         file_path = os.path.join(user_dir, stored_filename)
+        # Defence in depth: ensure the resolved path stays inside the user dir.
+        if os.path.commonpath(
+            [os.path.realpath(file_path), os.path.realpath(user_dir)]
+        ) != os.path.realpath(user_dir):
+            raise DocumentUploadError("Invalid filename")
+
         with open(file_path, "wb") as f:
             f.write(file_content)
 

@@ -38,9 +38,6 @@ dependencies = [
 
     # --- Logging ---
     "structlog>=24.1.0",
-
-    # --- Utilities ---
-    "httpx>=0.27.0",
 ]
 
 [project.optional-dependencies]
@@ -82,8 +79,3 @@ testpaths = ["tests"]
 python_version = "3.11"
 ignore_missing_imports = true
 strict = false
-
-[tool.pyrefly]
-python_interpreter = "venv/bin/python"
-python-interpreter-path = "venv/bin/python"
-search_path = ["."]
