@@ -343,7 +343,11 @@ docker compose up --build
 | **API Docs (Swagger)** | http://localhost:8000/docs          |
 | **Health Check**       | http://localhost:8000/api/v1/health |
 
-> **Note:** The backend automatically creates all database tables on startup — no manual migration needed for initial setup. Tables are created via SQLAlchemy's `create_all` in the app lifespan handler.
+> **Note:** With `DEBUG=true` (local dev) the backend automatically creates all database tables on startup. In production the schema is owned by Alembic — run `alembic upgrade head` against the database.
+
+### 5. Deploy to Vercel
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the required environment variables, the database migration step, and known serverless limitations.
 
 ---
 

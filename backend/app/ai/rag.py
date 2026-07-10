@@ -10,8 +10,20 @@ Stores historical question paper content as vector embeddings, enabling:
 import os
 from typing import Any
 
-import chromadb
-from chromadb.config import Settings as ChromaSettings
+# chromadb (and its onnxruntime embedding stack) is too large for serverless
+# deployments, so it is excluded from the Vercel runtime requirements. All
+# callers already wrap RAGPipeline usage in try/except and fall back to
+# non-RAG behaviour, so a missing chromadb just disables RAG features.
+try:
+    import chromadb
+    from chromadb.config import Settings as ChromaSettings
+
+    CHROMADB_AVAILABLE = True
+except ImportError:  # pragma: no cover - exercised only in slim deployments
+    chromadb = None  # type: ignore[assignment]
+    ChromaSettings = None  # type: ignore[assignment,misc]
+
+    CHROMADB_AVAILABLE = False
 
 from app.config import get_settings
 from app.core.logging import get_logger
@@ -32,6 +44,11 @@ class RAGPipeline:
     """
 
     def __init__(self):
+        if not CHROMADB_AVAILABLE:
+            raise RuntimeError(
+                "chromadb is not installed — RAG features are disabled in this deployment"
+            )
+
         settings = get_settings()
         persist_dir = os.path.join(settings.OUTPUTS_DIR, "chromadb")
         os.makedirs(persist_dir, exist_ok=True)
