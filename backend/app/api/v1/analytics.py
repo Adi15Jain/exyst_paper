@@ -180,6 +180,10 @@ async def get_confidence_breakdown(
             "topic_coverage": confidence_scores.get("topic_coverage_score", 0),
             "historical_alignment": confidence_scores.get("historical_alignment_score", 0),
             "question_quality": confidence_scores.get("question_quality_score", 0),
+            # The evaluator scores four factors, but this endpoint used to
+            # return only three — the marks-distribution factor was computed
+            # and stored, then dropped on the way out.
+            "marks_distribution": confidence_scores.get("marks_distribution_score", 0),
         },
         "per_question": confidence_scores.get("per_question_confidence", []),
     }

@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.evaluation import Evaluator
 from app.ai.pipelines.predictor import Predictor
 from app.ai.pipelines.syllabus_analyzer import SyllabusStructure
-from app.ai.rag import RAGPipeline
+from app.ai.rag import RAGStore
 from app.config import get_settings
 from app.core.exceptions import AnalysisError, PredictionError
 from app.core.logging import get_logger
@@ -126,7 +126,9 @@ class PredictionService:
 
             # 4. RAG retrieval — fetch semantically similar historical questions
             await _emit("rag_retrieval", 72, "Retrieving similar historical questions...")
-            rag_context = self._retrieve_rag_context(
+            rag_context = await self._retrieve_rag_context(
+                db=db,
+                user_id=user_id,
                 frequency_data=frequency_data,
                 syllabus=syllabus,
             )
@@ -198,22 +200,26 @@ class PredictionService:
             )
             raise PredictionError(f"Prediction generation failed: {str(e)}")
 
-    def _retrieve_rag_context(
+    async def _retrieve_rag_context(
         self,
+        db: AsyncSession,
+        user_id: UUID,
         frequency_data: dict[str, Any],
         syllabus: SyllabusStructure,
     ) -> list[dict[str, Any]]:
         """
-        Retrieve semantically similar historical questions from the RAG vector store.
+        Retrieve semantically similar historical questions from the vector store.
 
-        Queries the top-5 most frequent topics and the syllabus course title
-        to build a rich context of relevant past questions.
+        Queries the top frequent topics and the syllabus course title to build
+        a rich context of relevant past questions. Retrieval is scoped to this
+        user's chunks, so another user's questions can never leak into the
+        prompt. RAG is optional — any failure yields an empty context and the
+        prediction proceeds ungrounded.
         """
         try:
-            rag = RAGPipeline()
-            stats = rag.get_collection_stats()
+            rag = RAGStore()
 
-            if stats.get("total_questions", 0) == 0:
+            if await rag.count(db, user_id) == 0:
                 logger.info("rag_empty_skipping_retrieval")
                 return []
 
@@ -222,20 +228,15 @@ class PredictionService:
 
             # Query by top frequency topics
             freq_list = frequency_data.get("frequency", [])
-            top_topics = [item["topic"] for item in freq_list[:7]]
-
-            for topic in top_topics:
-                results = rag.retrieve_similar_questions(query=topic, n_results=5)
-                for r in results:
-                    text_key = r.get("text", "")[:100]
-                    if text_key not in seen_texts:
-                        seen_texts.add(text_key)
-                        all_retrieved.append(r)
+            queries = [item["topic"] for item in freq_list[:7]]
 
             # Also query by course title for broader context
             if syllabus.course_title:
-                results = rag.retrieve_similar_questions(
-                    query=syllabus.course_title, n_results=5
+                queries.append(syllabus.course_title)
+
+            for query in queries:
+                results = await rag.retrieve_similar_questions(
+                    db=db, user_id=user_id, query=query, n_results=5
                 )
                 for r in results:
                     text_key = r.get("text", "")[:100]

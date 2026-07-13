@@ -7,7 +7,9 @@
         },
         "backend": {
             "entrypoint": "backend/main.py",
-            "routePrefix": "/_backend"
+            "routePrefix": "/_backend",
+            "framework": "fastapi",
+            "maxDuration": 300
         }
     }
 }

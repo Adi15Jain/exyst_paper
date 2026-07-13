@@ -25,6 +25,11 @@ engine_kwargs: dict = {
 
 if settings.DEBUG or os.environ.get("VERCEL"):
     engine_kwargs["poolclass"] = NullPool
+    # Managed Postgres poolers (Supabase/Neon PgBouncer in transaction mode)
+    # break asyncpg's prepared-statement cache ("prepared statement already
+    # exists"); disable it — with NullPool there is no reuse to lose anyway.
+    if os.environ.get("VERCEL") and not settings.is_sqlite:
+        engine_kwargs["connect_args"] = {"statement_cache_size": 0}
 else:
     engine_kwargs["pool_size"] = 5
     engine_kwargs["max_overflow"] = 10

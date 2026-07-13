@@ -13,7 +13,6 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
-
 from app.config import get_settings
 from app.models import Base
 
@@ -50,10 +49,20 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_migrations_online() -> None:
     """Run migrations in 'online' mode using the async engine."""
+    connect_args: dict = {}
+    if not settings.is_sqlite:
+        # Transaction-mode poolers (Neon's `-pooler` host, Supabase's :6543)
+        # break asyncpg's prepared-statement cache with "prepared statement
+        # already exists". Disabling it lets migrations run against either the
+        # pooled or the direct connection string.
+        connect_args["statement_cache_size"] = 0
+        connect_args["prepared_statement_cache_size"] = 0
+
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=connect_args,
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

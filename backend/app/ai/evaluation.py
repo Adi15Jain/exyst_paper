@@ -2,7 +2,7 @@
 Evaluation and confidence scoring for predictions.
 
 Provides multi-factor confidence scoring:
-- Topic coverage: semantic similarity check of predicted vs syllabus topics
+- Topic coverage: how many syllabus topics the predicted questions touch
 - Question quality: well-formedness checks
 - Historical alignment: structural + topic pattern matching
 - Marks distribution: alignment of marks-per-question patterns
@@ -12,7 +12,6 @@ from collections import Counter
 from typing import Any
 
 from app.ai.pipelines.syllabus_analyzer import SyllabusStructure
-from app.ai.rag import RAGPipeline
 from app.core.logging import get_logger
 from app.schemas.prediction import ConfidenceReport, PredictedPaper
 
@@ -54,7 +53,7 @@ class Evaluator:
         topic_coverage = self._score_topic_coverage(paper, syllabus)
         question_quality = self._score_question_quality(paper)
         historical_alignment = self._score_historical_alignment(paper, frequency_data)
-        marks_distribution = self._score_marks_distribution(paper, frequency_data)
+        marks_distribution = self._score_marks_distribution(paper)
 
         # Weighted overall confidence (4 factors)
         overall = (
@@ -102,8 +101,12 @@ class Evaluator:
         """
         Score how many syllabus topics are covered by predictions.
 
-        Uses RAG semantic similarity when available, falls back to
-        substring matching.
+        Deterministic substring matching. (This previously attempted semantic
+        matching through the vector store, but that path only ever ran locally
+        — chromadb was absent in the serverless bundle — and it embedded every
+        syllabus topic on each evaluation. Scoring the same way everywhere is
+        worth more than the marginal recall; see ROADMAP 3c for a proper
+        embedding-based coverage score.)
 
         Returns float 0-1.
         """
@@ -120,34 +123,6 @@ class Evaluator:
         if not predicted_topics:
             return 0.0
 
-        # Try semantic matching via RAG first
-        try:
-            rag = RAGPipeline()
-            stats = rag.get_collection_stats()
-
-            if stats.get("total_topics", 0) > 0:
-                covered = 0
-                for st in syllabus_topics:
-                    # Check if any predicted topic is semantically close
-                    related = rag.retrieve_related_topics(query=st, n_results=3)
-                    # Also check substring match as fallback
-                    substring_match = any(st in pt or pt in st for pt in predicted_topics)
-
-                    semantic_match = any(
-                        r.get("similarity_score", 0) > 0.6
-                        for r in related
-                        if r.get("topic", "").lower() in predicted_topics
-                    )
-
-                    if substring_match or semantic_match:
-                        covered += 1
-
-                return min(covered / len(syllabus_topics), 1.0)
-
-        except Exception as e:
-            logger.warning("semantic_topic_scoring_failed_using_fallback", error=str(e))
-
-        # Fallback: substring matching
         covered = 0
         for st in syllabus_topics:
             for pt in predicted_topics:
@@ -283,17 +258,15 @@ class Evaluator:
 
         return topic_overlap_score * 0.5 + structural_score * 0.5
 
-    def _score_marks_distribution(
-        self,
-        paper: PredictedPaper,
-        frequency_data: dict[str, Any],
-    ) -> float:
+    def _score_marks_distribution(self, paper: PredictedPaper) -> float:
         """
-        Score how well the predicted marks-per-question distribution
-        matches the historical pattern.
+        Score the internal consistency of the predicted marks distribution.
 
-        Compares the distribution of question types and their marks
-        against what was observed in historical papers.
+        Note: despite the name, this does NOT compare against the historical
+        papers — it scores the predicted paper on its own (marks are positive
+        and plausible, types and marks agree, spread isn't degenerate). It used
+        to take a `frequency_data` argument that it never read. Scoring it
+        against the real historical distribution is ROADMAP 3c.
         """
         # Get predicted marks distribution
         predicted_marks: list[int] = []

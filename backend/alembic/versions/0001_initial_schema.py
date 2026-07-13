@@ -4,6 +4,12 @@ Creates the baseline schema (users, documents, analyses, predictions) that was
 previously produced at startup by Base.metadata.create_all. Mirrors the ORM
 models in app/models exactly.
 
+Idempotent by design: databases that were bootstrapped by the old
+`create_all` path (DEBUG=true) already have these tables but no
+`alembic_version` row, so a plain CREATE TABLE would fail with
+"relation already exists". Each object is created only if absent, which lets
+`alembic upgrade head` adopt such a database and carry on to later revisions.
+
 Revision ID: 0001_initial_schema
 Revises:
 Create Date: 2026-06-11
@@ -32,8 +38,17 @@ processing_status = postgresql.ENUM(
 )
 
 
+def _has_table(name: str) -> bool:
+    return sa.inspect(op.get_bind()).has_table(name)
+
+
 def upgrade() -> None:
     processing_status.create(op.get_bind(), checkfirst=True)
+
+    if _has_table("users"):
+        # Pre-existing schema (created by Base.metadata.create_all before
+        # Alembic owned it). Nothing to do — later revisions still apply.
+        return
 
     op.create_table(
         "users",

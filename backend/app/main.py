@@ -72,9 +72,8 @@ def create_app() -> FastAPI:
     # Routes
     app.include_router(api_router)
 
-    # Create upload directories
+    # Local-disk upload target (unused when object storage is configured)
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    os.makedirs(settings.OUTPUTS_DIR, exist_ok=True)
 
     return app
 

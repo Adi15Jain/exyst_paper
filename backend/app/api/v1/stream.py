@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.core.rate_limit import rate_limit
 from app.db.session import get_db
 from app.dependencies import get_current_user_id
 from app.services.analysis_service import AnalysisService
@@ -24,8 +25,11 @@ router = APIRouter(prefix="/pipeline", tags=["Pipeline"])
 analysis_service = AnalysisService()
 prediction_service = PredictionService()
 
+# Full pipeline = analysis + prediction LLM calls, held open up to 300s.
+pipeline_rate_limit = rate_limit("pipeline_stream", max_requests=10, window_seconds=600)
 
-@router.post("/{document_id}/run-stream")
+
+@router.post("/{document_id}/run-stream", dependencies=[Depends(pipeline_rate_limit)])
 async def run_pipeline_stream(
     document_id: UUID,
     user_id: UUID = Depends(get_current_user_id),

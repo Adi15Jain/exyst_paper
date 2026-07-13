@@ -49,6 +49,9 @@ Max marks: {max_marks}
 ## ACTUAL PAST QUESTION PAPERS (replicate this exact format; do not copy questions verbatim)
 {sample_papers}
 
+## Typical layout observed across the past papers
+{typical_format}
+
 ## Topics seen across the past papers (cover these in similar proportion)
 {frequency_summary}
 Syllabus topics (if available): {topics_by_unit}
@@ -199,6 +202,11 @@ class Predictor:
             frequency_summary=frequency_summary,
             max_marks=max_marks,
             duration=metadata.get("duration", "3 Hours"),
+            # The pattern analyzer's layout summary (question counts, section
+            # structure, type mix). Previously computed and passed but never
+            # placed in the prompt — the model never saw it.
+            typical_format=metadata.get("typical_format")
+            or "No typical format patterns detected.",
             next_year=next_year,
             rag_context=rag_context_text,
             sample_papers=sample_papers_text,

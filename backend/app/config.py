@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # Hard ceiling (seconds) on a single LLM call before it is treated as a
     # retryable failure, so a hung request can't stall the pipeline forever.
     LLM_TIMEOUT_SECONDS: float = 90.0
+    # An analysis still PROCESSING after this long is presumed dead (the
+    # serverless invocation running it was killed) and reported as FAILED so
+    # the client stops polling and can retry. Must exceed the longest
+    # realistic pipeline run.
+    ANALYSIS_TIMEOUT_SECONDS: float = 600.0
 
     # --- Database ---
     DATABASE_URL: str = "postgresql+asyncpg://exyst:exyst_password@localhost:5432/exyst_db"
@@ -56,9 +61,19 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # --- Email (password reset) ---
+    # Without RESEND_API_KEY the app does not send mail: in DEBUG the message
+    # (including the reset link) is logged instead, so the flow is testable
+    # locally. Outside DEBUG a missing key means reset emails silently don't
+    # arrive — set it in production.
+    RESEND_API_KEY: str = ""
+    EMAIL_FROM: str = "Exyst <onboarding@resend.dev>"
+    # Base URL of the frontend, used to build links in emails.
+    APP_BASE_URL: str = "http://localhost:3000"
+    PASSWORD_RESET_EXPIRE_MINUTES: int = 60
+
     # --- File Storage ---
     UPLOAD_DIR: str = "/tmp/uploads" if os.environ.get("VERCEL") else "uploads"
-    OUTPUTS_DIR: str = "/tmp/outputs" if os.environ.get("VERCEL") else "outputs"
     MAX_UPLOAD_SIZE_MB: int = 50
 
     @property
@@ -68,11 +83,6 @@ class Settings(BaseSettings):
     @property
     def is_sqlite(self) -> bool:
         return "sqlite" in self.DATABASE_URL
-
-    @property
-    def database_url_sync(self) -> str:
-        """Sync database URL for Alembic migrations."""
-        return self.DATABASE_URL.replace("+asyncpg", "+psycopg2")
 
     @model_validator(mode="after")
     def _validate_security(self) -> "Settings":

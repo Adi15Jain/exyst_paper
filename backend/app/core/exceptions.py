@@ -58,13 +58,6 @@ class RateLimitError(ExystBaseError):
 # --- Document Errors ---
 
 
-class DocumentError(ExystBaseError):
-    """Base error for document processing issues."""
-
-    def __init__(self, message: str = "Document processing error", **kwargs):
-        super().__init__(message=message, status_code=422, **kwargs)
-
-
 class DocumentNotFoundError(ExystBaseError):
     """Raised when a requested document doesn't exist."""
 
@@ -76,46 +69,41 @@ class DocumentNotFoundError(ExystBaseError):
         )
 
 
-class DocumentUploadError(DocumentError):
+class DocumentUploadError(ExystBaseError):
     """Raised when file upload fails validation."""
 
     def __init__(self, message: str = "File upload failed"):
-        super().__init__(message=message)
+        super().__init__(message=message, status_code=422)
 
 
-class PDFParsingError(DocumentError):
+class PDFParsingError(ExystBaseError):
     """Raised when PDF text extraction fails."""
 
     def __init__(self, message: str = "Failed to parse PDF"):
-        super().__init__(message=message)
+        super().__init__(message=message, status_code=422)
 
 
 # --- AI / LLM Errors ---
 
 
-class AIError(ExystBaseError):
-    """Base error for AI pipeline failures."""
-
-    def __init__(self, message: str = "AI processing error", **kwargs):
-        super().__init__(message=message, status_code=502, **kwargs)
-
-
-class LLMError(AIError):
+class LLMError(ExystBaseError):
     """Raised when an LLM call fails."""
 
     def __init__(self, message: str = "LLM call failed", model: str = ""):
         super().__init__(
             message=message,
+            status_code=502,
             details={"model": model},
         )
 
 
-class LLMOutputParsingError(AIError):
+class LLMOutputParsingError(ExystBaseError):
     """Raised when LLM output cannot be parsed into the expected schema."""
 
     def __init__(self, message: str = "Failed to parse LLM output", raw_output: str = ""):
         super().__init__(
             message=message,
+            status_code=502,
             details={"raw_output": raw_output[:500]},  # Truncate for safety
         )
 
