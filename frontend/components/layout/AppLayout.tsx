@@ -3,7 +3,7 @@
  * Used on all authenticated pages.
  */
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useAuth } from "@/lib/auth-context";
@@ -18,11 +18,18 @@ const navItems = [
   { href: "/upload", label: "Upload", icon: "📄" },
   { href: "/documents", label: "Documents", icon: "📁" },
   { href: "/analytics", label: "Analytics", icon: "📈" },
+  { href: "/settings", label: "Settings", icon: "⚙️" },
 ];
 
 export default function AppLayout({ children, title }: AppLayoutProps) {
   const router = useRouter();
   const { user, logout } = useAuth();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Close the mobile sidebar whenever navigation happens.
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [router.pathname]);
 
   const handleLogout = () => {
     logout();
@@ -31,21 +38,15 @@ export default function AppLayout({ children, title }: AppLayoutProps) {
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg-primary)" }}>
+      {/* Mobile overlay — closes the sidebar on tap */}
+      <div
+        className={`sidebar-overlay${sidebarOpen ? " open" : ""}`}
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden="true"
+      />
+
       {/* Sidebar */}
-      <aside
-        style={{
-          width: 240,
-          background: "var(--bg-secondary)",
-          borderRight: "1px solid var(--border-subtle)",
-          display: "flex",
-          flexDirection: "column",
-          position: "fixed",
-          top: 0,
-          left: 0,
-          bottom: 0,
-          zIndex: 40,
-        }}
-      >
+      <aside className={`app-sidebar${sidebarOpen ? " open" : ""}`}>
         {/* Logo */}
         <div
           style={{
@@ -164,18 +165,12 @@ export default function AppLayout({ children, title }: AppLayoutProps) {
       </aside>
 
       {/* Main Content */}
-      <main
-        style={{
-          flex: 1,
-          marginLeft: 240,
-          minHeight: "100vh",
-        }}
-      >
+      <main className="app-main">
         {/* Top Bar */}
         <header
           className="glass"
           style={{
-            padding: "16px 32px",
+            padding: "16px 24px",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -184,23 +179,30 @@ export default function AppLayout({ children, title }: AppLayoutProps) {
             zIndex: 30,
           }}
         >
-          <h2
-            style={{
-              fontSize: "1.25rem",
-              fontWeight: 700,
-              margin: 0,
-              color: "var(--text-primary)",
-            }}
-          >
-            {title || "Dashboard"}
-          </h2>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <span className="badge badge-success">● Connected</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <button
+              className="sidebar-toggle"
+              aria-label={sidebarOpen ? "Close navigation menu" : "Open navigation menu"}
+              aria-expanded={sidebarOpen}
+              onClick={() => setSidebarOpen((open) => !open)}
+            >
+              ☰
+            </button>
+            <h2
+              style={{
+                fontSize: "1.25rem",
+                fontWeight: 700,
+                margin: 0,
+                color: "var(--text-primary)",
+              }}
+            >
+              {title || "Dashboard"}
+            </h2>
           </div>
         </header>
 
         {/* Page Content */}
-        <div style={{ padding: "32px" }}>{children}</div>
+        <div className="app-content">{children}</div>
       </main>
     </div>
   );

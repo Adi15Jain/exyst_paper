@@ -6,6 +6,7 @@ import React, { useEffect, useState } from "react";
 import Head from "next/head";
 import { useRouter } from "next/router";
 import AppLayout from "@/components/layout/AppLayout";
+import Banner from "@/components/ui/Banner";
 import { useAuth } from "@/lib/auth-context";
 import {
     analytics as analyticsApi,
@@ -56,38 +57,14 @@ export default function DashboardPage() {
 
             <AppLayout title="Dashboard">
                 {loadError && (
-                    <div
-                        role="alert"
-                        style={{
-                            marginBottom: 24,
-                            padding: "12px 16px",
-                            borderRadius: "var(--radius-sm)",
-                            background: "rgba(239, 68, 68, 0.1)",
-                            border: "1px solid rgba(239, 68, 68, 0.2)",
-                            color: "#ef4444",
-                            fontSize: "0.85rem",
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            gap: 12,
-                        }}
+                    <Banner
+                        actionLabel="Retry"
+                        onAction={() => setReloadKey((k) => k + 1)}
+                        style={{ marginBottom: 24 }}
                     >
-                        <span>Couldn&apos;t load your dashboard data. The server may be unavailable.</span>
-                        <button
-                            onClick={() => setReloadKey((k) => k + 1)}
-                            style={{
-                                background: "rgba(239, 68, 68, 0.15)",
-                                border: "1px solid rgba(239, 68, 68, 0.3)",
-                                color: "#ef4444",
-                                cursor: "pointer",
-                                fontSize: "0.8rem",
-                                padding: "4px 12px",
-                                borderRadius: "var(--radius-sm)",
-                            }}
-                        >
-                            Retry
-                        </button>
-                    </div>
+                        Couldn&apos;t load your dashboard data. The server may be
+                        unavailable.
+                    </Banner>
                 )}
 
                 {/* Welcome Section */}

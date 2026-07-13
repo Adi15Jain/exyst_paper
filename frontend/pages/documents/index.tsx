@@ -6,6 +6,9 @@ import React, { useEffect, useState } from "react";
 import Head from "next/head";
 import { useRouter } from "next/router";
 import AppLayout from "@/components/layout/AppLayout";
+import Banner from "@/components/ui/Banner";
+import EmptyState from "@/components/ui/EmptyState";
+import Spinner from "@/components/ui/Spinner";
 import { useAuth } from "@/lib/auth-context";
 import { documents as documentsApi, DocumentData } from "@/lib/api";
 
@@ -18,6 +21,48 @@ export default function DocumentsPage() {
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState(false);
     const [reloadKey, setReloadKey] = useState(0);
+    const [deletingId, setDeletingId] = useState<string | null>(null);
+    const [actionError, setActionError] = useState<string | null>(null);
+
+    const handleRename = async (doc: DocumentData) => {
+        const current = doc.original_filename || doc.filename;
+        const next = window.prompt("Rename document", current);
+        if (!next || !next.trim() || next === current) return;
+
+        setActionError(null);
+        try {
+            await documentsApi.rename(doc.id, next.trim());
+            setReloadKey((k) => k + 1);
+        } catch (e) {
+            setActionError(e instanceof Error ? e.message : "Rename failed");
+        }
+    };
+
+    const handleDelete = async (doc: DocumentData) => {
+        const name = doc.original_filename || doc.filename;
+        if (
+            !window.confirm(
+                `Delete "${name}"? Its analyses and predictions will be deleted too. This cannot be undone.`,
+            )
+        ) {
+            return;
+        }
+        setActionError(null);
+        setDeletingId(doc.id);
+        try {
+            await documentsApi.delete(doc.id);
+            // If this was the last row on the page, step back a page.
+            if (docs.length === 1 && page > 1) {
+                setPage(page - 1);
+            } else {
+                setReloadKey((k) => k + 1);
+            }
+        } catch (e) {
+            setActionError(e instanceof Error ? e.message : "Delete failed");
+        } finally {
+            setDeletingId(null);
+        }
+    };
 
     useEffect(() => {
         if (authLoading) return;
@@ -54,38 +99,23 @@ export default function DocumentsPage() {
             <AppLayout title="Documents">
                 <div className="animate-fade-in">
                     {loadError && (
-                        <div
-                            role="alert"
-                            style={{
-                                marginBottom: 20,
-                                padding: "12px 16px",
-                                borderRadius: "var(--radius-sm)",
-                                background: "rgba(239, 68, 68, 0.1)",
-                                border: "1px solid rgba(239, 68, 68, 0.2)",
-                                color: "#ef4444",
-                                fontSize: "0.85rem",
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "center",
-                                gap: 12,
-                            }}
+                        <Banner
+                            actionLabel="Retry"
+                            onAction={() => setReloadKey((k) => k + 1)}
+                            style={{ marginBottom: 20 }}
                         >
-                            <span>Couldn&apos;t load your documents. The server may be unavailable.</span>
-                            <button
-                                onClick={() => setReloadKey((k) => k + 1)}
-                                style={{
-                                    background: "rgba(239, 68, 68, 0.15)",
-                                    border: "1px solid rgba(239, 68, 68, 0.3)",
-                                    color: "#ef4444",
-                                    cursor: "pointer",
-                                    fontSize: "0.8rem",
-                                    padding: "4px 12px",
-                                    borderRadius: "var(--radius-sm)",
-                                }}
-                            >
-                                Retry
-                            </button>
-                        </div>
+                            Couldn&apos;t load your documents. The server may be
+                            unavailable.
+                        </Banner>
+                    )}
+
+                    {actionError && (
+                        <Banner
+                            onDismiss={() => setActionError(null)}
+                            style={{ marginBottom: 20 }}
+                        >
+                            {actionError}
+                        </Banner>
                     )}
 
                     {/* Header */}
@@ -123,62 +153,15 @@ export default function DocumentsPage() {
 
                     {/* Document List */}
                     {loading ? (
-                        <div style={{ textAlign: "center", padding: "60px 0" }}>
-                            <span
-                                className="spinner"
-                                style={{
-                                    width: 32,
-                                    height: 32,
-                                    margin: "0 auto",
-                                    display: "block",
-                                }}
-                            />
-                            <p
-                                style={{
-                                    color: "var(--text-muted)",
-                                    marginTop: 12,
-                                    fontSize: "0.85rem",
-                                }}
-                            >
-                                Loading documents...
-                            </p>
-                        </div>
+                        <Spinner caption="Loading documents..." />
                     ) : docs.length === 0 ? (
-                        <div
-                            className="glass-card"
-                            style={{
-                                textAlign: "center",
-                                padding: "60px 24px",
-                            }}
-                        >
-                            <p style={{ fontSize: "3rem", marginBottom: 12 }}>
-                                📭
-                            </p>
-                            <p
-                                style={{
-                                    fontSize: "1.1rem",
-                                    fontWeight: 600,
-                                    color: "var(--text-primary)",
-                                }}
-                            >
-                                No documents yet
-                            </p>
-                            <p
-                                style={{
-                                    color: "var(--text-muted)",
-                                    marginBottom: 20,
-                                    fontSize: "0.9rem",
-                                }}
-                            >
-                                Upload your first exam document to get started
-                            </p>
-                            <button
-                                className="btn-primary"
-                                onClick={() => router.push("/upload")}
-                            >
-                                Upload Document
-                            </button>
-                        </div>
+                        <EmptyState
+                            icon="📭"
+                            title="No documents yet"
+                            hint="Upload your first exam document to get started"
+                            actionLabel="Upload Document"
+                            onAction={() => router.push("/upload")}
+                        />
                     ) : (
                         <div
                             style={{
@@ -281,6 +264,53 @@ export default function DocumentsPage() {
                                         >
                                             {doc.status}
                                         </span>
+                                        <button
+                                            aria-label={`Rename ${doc.original_filename || doc.filename}`}
+                                            title="Rename document"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleRename(doc);
+                                            }}
+                                            style={{
+                                                background: "transparent",
+                                                border: "1px solid var(--border-subtle)",
+                                                color: "var(--text-secondary)",
+                                                cursor: "pointer",
+                                                fontSize: "0.75rem",
+                                                padding: "6px 12px",
+                                                borderRadius:
+                                                    "var(--radius-sm)",
+                                            }}
+                                        >
+                                            Rename
+                                        </button>
+                                        <button
+                                            aria-label={`Delete ${doc.original_filename || doc.filename}`}
+                                            title="Delete document"
+                                            disabled={deletingId === doc.id}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDelete(doc);
+                                            }}
+                                            style={{
+                                                background:
+                                                    "rgba(239, 68, 68, 0.1)",
+                                                border: "1px solid rgba(239, 68, 68, 0.2)",
+                                                color: "#ef4444",
+                                                cursor:
+                                                    deletingId === doc.id
+                                                        ? "wait"
+                                                        : "pointer",
+                                                fontSize: "0.75rem",
+                                                padding: "6px 12px",
+                                                borderRadius:
+                                                    "var(--radius-sm)",
+                                            }}
+                                        >
+                                            {deletingId === doc.id
+                                                ? "Deleting…"
+                                                : "Delete"}
+                                        </button>
                                         <span
                                             style={{
                                                 color: "var(--text-muted)",

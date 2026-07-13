@@ -8,7 +8,7 @@
  */
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { auth as authApi, User, getAccessToken, clearTokens } from "@/lib/api";
+import { auth as authApi, User } from "@/lib/api";
 
 interface AuthContextType {
   user: User | null;
@@ -16,6 +16,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -24,27 +25,21 @@ const AuthContext = createContext<AuthContextType>({
   login: async () => {},
   register: async () => {},
   logout: () => {},
+  refreshUser: async () => {},
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Check for existing session on mount
+  // Restore the session on mount: the access token lives in memory only, so
+  // a page load exchanges the httpOnly refresh cookie for a new one.
   useEffect(() => {
-    const token = getAccessToken();
-    if (token) {
-      authApi
-        .me()
-        .then(setUser)
-        .catch(() => {
-          clearTokens();
-          setUser(null);
-        })
-        .finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
+    authApi
+      .restore()
+      .then(setUser)
+      .catch(() => setUser(null))
+      .finally(() => setLoading(false));
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
@@ -61,12 +56,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
-    authApi.logout();
+    // Server revocation is fire-and-forget; local state clears immediately.
+    void authApi.logout();
     setUser(null);
   }, []);
 
+  // Re-read the profile after the user edits it (e.g. renames themselves).
+  const refreshUser = useCallback(async () => {
+    setUser(await authApi.me());
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider
+      value={{ user, loading, login, register, logout, refreshUser }}
+    >
       {children}
     </AuthContext.Provider>
   );

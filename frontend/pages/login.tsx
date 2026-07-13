@@ -4,6 +4,7 @@
 
 import React, { useState } from "react";
 import Head from "next/head";
+import Link from "next/link";
 import { useRouter } from "next/router";
 import { useAuth } from "@/lib/auth-context";
 
@@ -214,7 +215,30 @@ export default function LoginPage() {
                                     }
                                     minLength={8}
                                     required
+                                    autoComplete={
+                                        isRegister
+                                            ? "new-password"
+                                            : "current-password"
+                                    }
                                 />
+                                {!isRegister && (
+                                    <p
+                                        style={{
+                                            margin: "8px 0 0",
+                                            textAlign: "right",
+                                            fontSize: "0.75rem",
+                                        }}
+                                    >
+                                        <Link
+                                            href="/forgot-password"
+                                            style={{
+                                                color: "var(--text-muted)",
+                                            }}
+                                        >
+                                            Forgot password?
+                                        </Link>
+                                    </p>
+                                )}
                             </div>
 
                             {error && (

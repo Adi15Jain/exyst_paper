@@ -322,7 +322,7 @@ export default function LandingPage() {
                         <span>•</span>
                         <span>PostgreSQL</span>
                         <span>•</span>
-                        <span>ChromaDB</span>
+                        <span>pgvector</span>
                     </div>
                 </div>
             </div>

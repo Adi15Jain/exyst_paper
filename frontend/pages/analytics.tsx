@@ -6,6 +6,9 @@ import React, { useEffect, useState } from "react";
 import Head from "next/head";
 import { useRouter } from "next/router";
 import AppLayout from "@/components/layout/AppLayout";
+import Banner from "@/components/ui/Banner";
+import EmptyState from "@/components/ui/EmptyState";
+import Spinner from "@/components/ui/Spinner";
 import { useAuth } from "@/lib/auth-context";
 import { analytics as analyticsApi, OverviewStats } from "@/lib/api";
 
@@ -60,81 +63,26 @@ export default function AnalyticsPage() {
                     </p>
 
                     {loadError && (
-                        <div
-                            role="alert"
-                            style={{
-                                marginBottom: 20,
-                                padding: "12px 16px",
-                                borderRadius: "var(--radius-sm)",
-                                background: "rgba(239, 68, 68, 0.1)",
-                                border: "1px solid rgba(239, 68, 68, 0.2)",
-                                color: "#ef4444",
-                                fontSize: "0.85rem",
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "center",
-                                gap: 12,
-                            }}
+                        <Banner
+                            actionLabel="Retry"
+                            onAction={() => setReloadKey((k) => k + 1)}
+                            style={{ marginBottom: 20 }}
                         >
-                            <span>Couldn&apos;t load analytics. The server may be unavailable.</span>
-                            <button
-                                onClick={() => setReloadKey((k) => k + 1)}
-                                style={{
-                                    background: "rgba(239, 68, 68, 0.15)",
-                                    border: "1px solid rgba(239, 68, 68, 0.3)",
-                                    color: "#ef4444",
-                                    cursor: "pointer",
-                                    fontSize: "0.8rem",
-                                    padding: "4px 12px",
-                                    borderRadius: "var(--radius-sm)",
-                                }}
-                            >
-                                Retry
-                            </button>
-                        </div>
+                            Couldn&apos;t load analytics. The server may be
+                            unavailable.
+                        </Banner>
                     )}
 
                     {loading ? (
-                        <div style={{ textAlign: "center", padding: "80px 0" }}>
-                            <span
-                                className="spinner"
-                                style={{
-                                    width: 32,
-                                    height: 32,
-                                    margin: "0 auto",
-                                    display: "block",
-                                }}
-                            />
-                        </div>
+                        <Spinner padding="80px 0" />
                     ) : !stats ? (
-                        <div
-                            className="glass-card"
-                            style={{
-                                padding: "60px 24px",
-                                textAlign: "center",
-                            }}
-                        >
-                            <p style={{ fontSize: "2.5rem", marginBottom: 12 }}>
-                                📈
-                            </p>
-                            <p style={{ fontSize: "1.1rem", fontWeight: 600 }}>
-                                No data yet
-                            </p>
-                            <p
-                                style={{
-                                    color: "var(--text-muted)",
-                                    marginBottom: 20,
-                                }}
-                            >
-                                Upload and analyze documents to see analytics
-                            </p>
-                            <button
-                                className="btn-primary"
-                                onClick={() => router.push("/upload")}
-                            >
-                                Upload Your First Document
-                            </button>
-                        </div>
+                        <EmptyState
+                            icon="📈"
+                            title="No data yet"
+                            hint="Upload and analyze documents to see analytics"
+                            actionLabel="Upload Your First Document"
+                            onAction={() => router.push("/upload")}
+                        />
                     ) : (
                         <>
                             {/* Document & Analysis Stats */}
@@ -171,12 +119,8 @@ export default function AnalyticsPage() {
 
                             {/* Confidence & Performance */}
                             <div
-                                style={{
-                                    display: "grid",
-                                    gridTemplateColumns: "1fr 1fr",
-                                    gap: 20,
-                                    marginBottom: 28,
-                                }}
+                                className="grid-2"
+                                style={{ marginBottom: 28 }}
                             >
                                 {/* Confidence Summary */}
                                 <div

@@ -6,6 +6,8 @@ import React, { useEffect, useState } from "react";
 import Head from "next/head";
 import { useRouter } from "next/router";
 import AppLayout from "@/components/layout/AppLayout";
+import Banner from "@/components/ui/Banner";
+import Spinner from "@/components/ui/Spinner";
 import { useAuth } from "@/lib/auth-context";
 import {
     documents as documentsApi,
@@ -15,7 +17,83 @@ import {
     DocumentData,
     AnalysisResult,
     PredictionData,
+    PredictedPaper,
+    PredictedSection,
+    PredictedQuestion,
+    PerQuestionConfidence,
+    QuestionPart,
+    TopicFrequencyData,
 } from "@/lib/api";
+
+
+const compactBtn: React.CSSProperties = {
+    padding: "6px 12px",
+    fontSize: "0.8rem",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    margin: 0,
+};
+
+/**
+ * Render a predicted paper as plain text — for the clipboard, and for pasting
+ * into Word/Docs. Mirrors the on-screen layout: header, then each section with
+ * its questions, parts, and any "Or" alternative.
+ */
+function paperToPlainText(paper: PredictedPaper): string {
+    const info = paper.paper_info || {};
+    const lines: string[] = [];
+
+    lines.push(info.title || "Predicted Question Paper");
+    if (info.subject) lines.push(info.subject);
+    const meta = [
+        info.academic_year,
+        info.duration && `Duration: ${info.duration}`,
+        info.max_marks && `Max Marks: ${info.max_marks}`,
+    ].filter(Boolean);
+    if (meta.length) lines.push(meta.join("   |   "));
+    if (info.instructions?.length) {
+        lines.push("");
+        info.instructions.forEach((ins) => lines.push(`- ${ins}`));
+    }
+
+    const renderParts = (parts: QuestionPart[], indent: string) => {
+        parts.forEach((pt) => {
+            const marks = pt.marks ? ` [${pt.marks}]` : "";
+            lines.push(`${indent}${pt.label ? `${pt.label}) ` : ""}${pt.question_text}${marks}`);
+        });
+    };
+
+    (paper.sections || []).forEach((section) => {
+        lines.push("");
+        lines.push("─".repeat(60));
+        const title = [section.section_name, section.title]
+            .filter(Boolean)
+            .join(" — ");
+        lines.push(title.toUpperCase());
+        if (section.total_marks) lines.push(`(${section.total_marks} marks)`);
+        lines.push("");
+
+        (section.questions || []).forEach((q) => {
+            const marks = q.marks ? ` [${q.marks}]` : "";
+            lines.push(`Q${q.question_number}. ${q.question_text}${marks}`);
+            if (q.parts?.length) renderParts(q.parts, "    ");
+
+            if (q.or_choice) {
+                lines.push("    OR");
+                if (q.or_choice.question_text) {
+                    lines.push(`    ${q.or_choice.question_text}`);
+                }
+                if (q.or_choice.parts?.length) {
+                    renderParts(q.or_choice.parts, "    ");
+                }
+            }
+            lines.push("");
+        });
+    });
+
+    return lines.join("\n").trim() + "\n";
+}
 
 export default function DocumentDetailPage() {
     const router = useRouter();
@@ -27,13 +105,27 @@ export default function DocumentDetailPage() {
         null,
     );
     const [prediction, setPrediction] = useState<PredictionData | null>(null);
-    const [topicData, setTopicData] = useState<any>(null);
+    const [topicData, setTopicData] = useState<TopicFrequencyData | null>(null);
     const [activeTab, setActiveTab] = useState<
         "prediction" | "analysis" | "confidence"
     >("prediction");
     const [loading, setLoading] = useState(true);
     const [regenerating, setRegenerating] = useState(false);
     const [actionError, setActionError] = useState("");
+    const [copied, setCopied] = useState(false);
+
+    const handleCopyText = async () => {
+        if (!prediction?.predicted_paper) return;
+        try {
+            await navigator.clipboard.writeText(
+                paperToPlainText(prediction.predicted_paper),
+            );
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch {
+            setActionError("Couldn't copy to clipboard.");
+        }
+    };
 
     const handleRegenerate = async () => {
         if (!id) return;
@@ -85,23 +177,14 @@ export default function DocumentDetailPage() {
     if (loading) {
         return (
             <AppLayout title="Loading...">
-                <div style={{ textAlign: "center", padding: "80px 0" }}>
-                    <span
-                        className="spinner"
-                        style={{
-                            width: 40,
-                            height: 40,
-                            margin: "0 auto",
-                            display: "block",
-                        }}
-                    />
-                </div>
+                <Spinner size={40} padding="80px 0" />
             </AppLayout>
         );
     }
 
     const paper = prediction?.predicted_paper;
     const confidence = prediction?.confidence;
+    const chart = topicData?.chart_data;
 
     return (
         <>
@@ -111,38 +194,12 @@ export default function DocumentDetailPage() {
 
             <AppLayout title={doc?.original_filename || "Document Detail"}>
                 {actionError && (
-                    <div
-                        role="alert"
-                        style={{
-                            marginBottom: 20,
-                            padding: "12px 16px",
-                            borderRadius: "var(--radius-sm)",
-                            background: "rgba(239, 68, 68, 0.1)",
-                            border: "1px solid rgba(239, 68, 68, 0.2)",
-                            color: "#ef4444",
-                            fontSize: "0.85rem",
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            gap: 12,
-                        }}
+                    <Banner
+                        onDismiss={() => setActionError("")}
+                        style={{ marginBottom: 20 }}
                     >
-                        <span>{actionError}</span>
-                        <button
-                            onClick={() => setActionError("")}
-                            style={{
-                                background: "none",
-                                border: "none",
-                                color: "#ef4444",
-                                cursor: "pointer",
-                                fontSize: "1rem",
-                                lineHeight: 1,
-                            }}
-                            aria-label="Dismiss error"
-                        >
-                            ✕
-                        </button>
-                    </div>
+                        {actionError}
+                    </Banner>
                 )}
 
                 {/* Summary Bar */}
@@ -294,7 +351,7 @@ export default function DocumentDetailPage() {
                                 </button>
                             </div>
                         ) : (
-                            <>
+                            <div className="printable-paper">
                                 {/* Paper Header */}
                                 <div
                                     className="glass-card"
@@ -323,32 +380,49 @@ export default function DocumentDetailPage() {
                                             {paper.paper_info?.title ||
                                                 "Predicted Question Paper"}
                                         </h2>
-                                        <button
-                                            className="btn-secondary"
-                                            onClick={handleRegenerate}
-                                            disabled={regenerating}
+                                        <div
+                                            className="no-print"
                                             style={{
-                                                padding: "6px 12px",
-                                                fontSize: "0.8rem",
-                                                display: "inline-flex",
-                                                alignItems: "center",
-                                                gap: 6,
-                                                margin: 0,
+                                                display: "flex",
+                                                gap: 8,
+                                                flexWrap: "wrap",
                                             }}
                                         >
-                                            {regenerating && (
-                                                <span
-                                                    className="spinner"
-                                                    style={{
-                                                        width: 12,
-                                                        height: 12,
-                                                    }}
-                                                />
-                                            )}
-                                            {regenerating
-                                                ? "Regenerating..."
-                                                : "🔄 Regenerate"}
-                                        </button>
+                                            <button
+                                                className="btn-secondary"
+                                                onClick={() => window.print()}
+                                                title="Opens your browser's print dialog — choose 'Save as PDF'"
+                                                style={compactBtn}
+                                            >
+                                                ⬇ Download PDF
+                                            </button>
+                                            <button
+                                                className="btn-secondary"
+                                                onClick={handleCopyText}
+                                                style={compactBtn}
+                                            >
+                                                {copied ? "✓ Copied" : "📋 Copy text"}
+                                            </button>
+                                            <button
+                                                className="btn-secondary"
+                                                onClick={handleRegenerate}
+                                                disabled={regenerating}
+                                                style={compactBtn}
+                                            >
+                                                {regenerating && (
+                                                    <span
+                                                        className="spinner"
+                                                        style={{
+                                                            width: 12,
+                                                            height: 12,
+                                                        }}
+                                                    />
+                                                )}
+                                                {regenerating
+                                                    ? "Regenerating..."
+                                                    : "🔄 Regenerate"}
+                                            </button>
+                                        </div>
                                     </div>
                                     <p
                                         style={{
@@ -386,7 +460,7 @@ export default function DocumentDetailPage() {
 
                                 {/* Sections */}
                                 {paper.sections?.map(
-                                    (section: any, sIdx: number) => (
+                                    (section: PredictedSection, sIdx: number) => (
                                         <div
                                             key={sIdx}
                                             className="glass-card"
@@ -438,7 +512,7 @@ export default function DocumentDetailPage() {
                                                 }}
                                             >
                                                 {section.questions?.map(
-                                                    (q: any, qIdx: number) => (
+                                                    (q: PredictedQuestion, qIdx: number) => (
                                                         <div
                                                             key={qIdx}
                                                             style={{
@@ -611,6 +685,7 @@ export default function DocumentDetailPage() {
                                                                     {q.confidence !==
                                                                         undefined && (
                                                                         <p
+                                                                            className="no-print"
                                                                             style={{
                                                                                 margin: "4px 0 0",
                                                                                 fontSize:
@@ -639,7 +714,7 @@ export default function DocumentDetailPage() {
                                         </div>
                                     ),
                                 )}
-                            </>
+                            </div>
                         )}
                     </div>
                 )}
@@ -647,7 +722,7 @@ export default function DocumentDetailPage() {
                 {activeTab === "analysis" && (
                     <div className="animate-fade-in">
                         {/* Topic Frequency Chart */}
-                        {topicData?.chart_data?.labels?.length > 0 && (
+                        {chart && chart.labels.length > 0 && (
                             <div
                                 className="glass-card"
                                 style={{ padding: 24, marginBottom: 20 }}
@@ -668,7 +743,7 @@ export default function DocumentDetailPage() {
                                         gap: 10,
                                     }}
                                 >
-                                    {topicData.chart_data.labels.map(
+                                    {chart.labels.map(
                                         (label: string, i: number) => (
                                             <div
                                                 key={i}
@@ -702,21 +777,15 @@ export default function DocumentDetailPage() {
                                                         className="bar-chart-bar"
                                                         style={{
                                                             width: `${Math.max(
-                                                                (topicData
-                                                                    .chart_data
-                                                                    .values[i] /
+                                                                (chart.values[i] /
                                                                     Math.max(
-                                                                        ...topicData
-                                                                            .chart_data
-                                                                            .values,
+                                                                        ...chart.values,
                                                                     )) *
                                                                     100,
                                                                 4,
                                                             )}%`,
                                                             background:
-                                                                topicData
-                                                                    .chart_data
-                                                                    .colors[i],
+                                                                chart.colors[i],
                                                         }}
                                                     />
                                                 </div>
@@ -729,22 +798,11 @@ export default function DocumentDetailPage() {
                                                         flexShrink: 0,
                                                     }}
                                                 >
-                                                    {
-                                                        topicData.chart_data
-                                                            .values[i]
-                                                    }
-                                                    x (
-                                                    {
-                                                        topicData.chart_data
-                                                            .percentages[i]
-                                                    }
-                                                    %)
+                                                    {chart.values[i]}x (
+                                                    {chart.percentages[i]}%)
                                                 </span>
                                                 <TrendBadge
-                                                    trend={
-                                                        topicData.chart_data
-                                                            .trends[i]
-                                                    }
+                                                    trend={chart.trends[i]}
                                                 />
                                             </div>
                                         ),
@@ -899,7 +957,7 @@ export default function DocumentDetailPage() {
                                     }}
                                 >
                                     {confidence.per_question_confidence.map(
-                                        (q: any, i: number) => (
+                                        (q: PerQuestionConfidence, i: number) => (
                                             <div
                                                 key={i}
                                                 style={{
@@ -928,12 +986,12 @@ export default function DocumentDetailPage() {
                                                         fontSize: "0.8rem",
                                                         fontWeight: 700,
                                                         color: getConfidenceColor(
-                                                            q.confidence,
+                                                            q.confidence ?? 0,
                                                         ),
                                                     }}
                                                 >
                                                     {(
-                                                        q.confidence * 100
+                                                        (q.confidence ?? 0) * 100
                                                     ).toFixed(0)}
                                                     %
                                                 </span>
@@ -991,10 +1049,10 @@ export default function DocumentDetailPage() {
 
 // --- Helper Components ---
 
-function QuestionParts({ parts }: { parts: any[] }) {
+function QuestionParts({ parts }: { parts: QuestionPart[] }) {
     return (
         <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
-            {parts.map((pt: any, i: number) => (
+            {parts.map((pt: QuestionPart, i: number) => (
                 <div
                     key={i}
                     style={{

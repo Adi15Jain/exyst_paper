@@ -25,31 +25,21 @@ const API_BASE = getApiBase();
 const API_V1 = `${API_BASE}/api/v1`;
 
 // --- Token Management ---
+//
+// The access token lives in memory only (30-min lifetime); the refresh token
+// lives in an httpOnly cookie set by the backend, so script — including any
+// injected XSS payload — can never read it. On a full page load the session
+// is restored via auth.restore(), which exchanges the cookie for a fresh
+// access token.
 
 let accessToken: string | null = null;
-let refreshToken: string | null = null;
 
-if (typeof window !== "undefined") {
-    accessToken = localStorage.getItem("exyst_access_token");
-    refreshToken = localStorage.getItem("exyst_refresh_token");
-}
-
-export function setTokens(access: string, refresh: string) {
+export function setAccessToken(access: string) {
     accessToken = access;
-    refreshToken = refresh;
-    if (typeof window !== "undefined") {
-        localStorage.setItem("exyst_access_token", access);
-        localStorage.setItem("exyst_refresh_token", refresh);
-    }
 }
 
-export function clearTokens() {
+export function clearAccessToken() {
     accessToken = null;
-    refreshToken = null;
-    if (typeof window !== "undefined") {
-        localStorage.removeItem("exyst_access_token");
-        localStorage.removeItem("exyst_refresh_token");
-    }
 }
 
 export function getAccessToken(): string | null {
@@ -83,14 +73,28 @@ async function apiFetch<T>(
         headers,
     });
 
-    // Handle 401 — try refreshing token
-    if (response.status === 401 && retry && refreshToken) {
+    // Handle 401 — try refreshing via the httpOnly cookie. Never for the
+    // credential endpoints: there a 401 means "wrong password" or "bad reset
+    // token", not "expired session". Refreshing would be pointless, and on the
+    // reset page it would bounce the user to /login instead of showing why.
+    const CREDENTIAL_PATHS = [
+        "/auth/login",
+        "/auth/register",
+        "/auth/change-password",
+        "/auth/reset-password",
+        "/auth/forgot-password",
+    ];
+    const isCredentialEndpoint = CREDENTIAL_PATHS.some((p) => path.startsWith(p));
+    if (response.status === 401 && retry && !isCredentialEndpoint) {
         const refreshed = await tryRefreshToken();
         if (refreshed) {
             return apiFetch<T>(path, options, false);
         }
-        clearTokens();
-        if (typeof window !== "undefined") {
+        clearAccessToken();
+        if (
+            typeof window !== "undefined" &&
+            window.location.pathname !== "/login"
+        ) {
             window.location.href = "/login";
         }
         throw new Error("Session expired. Please log in again.");
@@ -105,21 +109,26 @@ async function apiFetch<T>(
         );
     }
 
+    if (response.status === 204) {
+        return undefined as T;
+    }
+
     return response.json();
 }
 
 async function tryRefreshToken(): Promise<boolean> {
     try {
+        // The refresh token travels in the httpOnly cookie; the rotated one
+        // comes back the same way. Only the access token is in the body.
         const response = await fetch(`${API_V1}/auth/refresh`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ refresh_token: refreshToken }),
+            credentials: "include",
         });
 
         if (!response.ok) return false;
 
         const data = await response.json();
-        setTokens(data.access_token, data.refresh_token);
+        setAccessToken(data.access_token);
         return true;
     } catch {
         return false;
@@ -130,7 +139,7 @@ async function tryRefreshToken(): Promise<boolean> {
 
 export interface LoginResponse {
     access_token: string;
-    refresh_token: string;
+    // The refresh token is delivered as an httpOnly cookie, never in the body.
     token_type: string;
 }
 
@@ -149,19 +158,73 @@ export const auth = {
         }),
 
     login: async (email: string, password: string): Promise<LoginResponse> => {
+        // credentials: "include" so the backend's refresh cookie is stored
+        // even when the API runs on another origin (local dev).
         const data = await apiFetch<LoginResponse>("/auth/login", {
             method: "POST",
             body: JSON.stringify({ email, password }),
+            credentials: "include",
         });
-        setTokens(data.access_token, data.refresh_token);
+        setAccessToken(data.access_token);
         return data;
     },
 
     me: () => apiFetch<User>("/auth/me"),
 
-    logout: () => {
-        clearTokens();
+    /**
+     * Restore the session after a full page load: exchange the httpOnly
+     * refresh cookie for a fresh access token, then load the user.
+     * Resolves null when there is no valid session.
+     */
+    restore: async (): Promise<User | null> => {
+        const refreshed = await tryRefreshToken();
+        if (!refreshed) return null;
+        return apiFetch<User>("/auth/me");
     },
+
+    logout: async (): Promise<void> => {
+        try {
+            // Revokes every outstanding refresh token and clears the cookie.
+            await fetch(`${API_V1}/auth/logout`, {
+                method: "POST",
+                credentials: "include",
+            });
+        } catch {
+            // Network failure shouldn't block local sign-out.
+        }
+        clearAccessToken();
+    },
+
+    updateProfile: (name: string) =>
+        apiFetch<User>("/auth/me", {
+            method: "PATCH",
+            body: JSON.stringify({ name }),
+        }),
+
+    changePassword: (currentPassword: string, newPassword: string) =>
+        apiFetch<void>("/auth/change-password", {
+            method: "POST",
+            body: JSON.stringify({
+                current_password: currentPassword,
+                new_password: newPassword,
+            }),
+        }),
+
+    deleteAccount: () =>
+        apiFetch<void>("/auth/me", { method: "DELETE", credentials: "include" }),
+
+    forgotPassword: (email: string) =>
+        apiFetch<{ message: string }>("/auth/forgot-password", {
+            method: "POST",
+            body: JSON.stringify({ email }),
+        }),
+
+    resetPassword: (token: string, newPassword: string) =>
+        apiFetch<void>("/auth/reset-password", {
+            method: "POST",
+            body: JSON.stringify({ token, new_password: newPassword }),
+            credentials: "include",
+        }),
 };
 
 // --- Documents API ---
@@ -201,6 +264,15 @@ export const documents = {
         ),
 
     get: (id: string) => apiFetch<DocumentData>(`/documents/${id}`),
+
+    rename: (id: string, name: string) =>
+        apiFetch<DocumentData>(`/documents/${id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ original_filename: name }),
+        }),
+
+    delete: (id: string) =>
+        apiFetch<void>(`/documents/${id}`, { method: "DELETE" }),
 };
 
 // --- Analysis API ---
@@ -212,14 +284,51 @@ export interface AnalysisStatus {
     error_message?: string;
 }
 
+/** Mirrors backend app/schemas/analysis.py — keep in sync. */
+export interface SyllabusUnit {
+    unit_number?: number | string;
+    title?: string;
+    topics?: string[];
+}
+
+export interface SyllabusStructure {
+    course_title?: string | null;
+    units?: SyllabusUnit[];
+    total_topics?: number;
+}
+
+export interface QuestionPaperSummary {
+    academic_session?: string | null;
+    session?: string;
+    text?: string;
+    total_questions?: number;
+    max_marks?: number | null;
+    topics_covered?: string[];
+}
+
+export interface TopicFrequency {
+    topic: string;
+    count: number;
+    percentage: number;
+    trend: "rising" | "falling" | "stable" | string;
+}
+
+export interface PatternAnalysis {
+    subject?: string;
+    max_marks?: number | string;
+    duration?: string;
+    typical_question_format?: string;
+    [key: string]: unknown;
+}
+
 export interface AnalysisResult {
     id: string;
     document_id: string;
     status: string;
-    syllabus_structure?: any;
-    question_papers?: any[];
-    topic_frequency?: any[];
-    pattern_analysis?: any;
+    syllabus_structure?: SyllabusStructure | null;
+    question_papers?: QuestionPaperSummary[];
+    topic_frequency?: TopicFrequency[];
+    pattern_analysis?: PatternAnalysis | null;
     num_pages_processed?: number;
     num_papers_found?: number;
     processing_time_seconds?: number;
@@ -243,11 +352,80 @@ export const analysis = {
 
 // --- Predictions API ---
 
+/** Mirrors backend app/schemas/prediction.py — keep in sync. */
+export interface QuestionPart {
+    label: string;
+    question_text: string;
+    marks: number;
+}
+
+export interface AlternativeQuestion {
+    question_text: string;
+    parts: QuestionPart[];
+}
+
+export interface PredictedQuestion {
+    question_number: number;
+    question_text: string;
+    topic: string;
+    marks: number;
+    question_type: "short" | "medium" | "long";
+    has_parts: boolean;
+    parts: QuestionPart[];
+    or_choice: AlternativeQuestion | null;
+    confidence: number;
+    reasoning: string;
+}
+
+export interface PredictedSection {
+    section_name: string;
+    title: string;
+    description: string;
+    questions: PredictedQuestion[];
+    total_marks: number;
+}
+
+export interface PaperInfo {
+    title?: string;
+    subject?: string;
+    academic_year?: string;
+    duration?: string;
+    max_marks?: string | number;
+    instructions?: string[];
+}
+
+export interface PredictedPaper {
+    paper_info: PaperInfo;
+    sections: PredictedSection[];
+    total_questions: number;
+    topic_coverage: Record<string, number>;
+    overall_confidence: number;
+    is_fallback: boolean;
+    error_message: string | null;
+}
+
+export interface PerQuestionConfidence {
+    question_number?: number;
+    question_text?: string;
+    topic?: string;
+    confidence?: number;
+    [key: string]: unknown;
+}
+
+export interface ConfidenceReport {
+    overall_confidence: number;
+    topic_coverage_score: number;
+    historical_alignment_score: number;
+    question_quality_score: number;
+    marks_distribution_score: number;
+    per_question_confidence: PerQuestionConfidence[];
+}
+
 export interface PredictionData {
     id: string;
     analysis_id: string;
-    predicted_paper: any;
-    confidence: any;
+    predicted_paper: PredictedPaper;
+    confidence: ConfidenceReport | null;
     overall_confidence: number;
     topic_coverage: Record<string, number>;
     model_used?: string;
@@ -263,9 +441,6 @@ export const predictions = {
 
     get: (documentId: string) =>
         apiFetch<PredictionData>(`/predictions/${documentId}`),
-
-    confidence: (documentId: string) =>
-        apiFetch<any>(`/predictions/${documentId}/confidence`),
 };
 
 // --- Analytics API ---
@@ -288,7 +463,7 @@ export interface OverviewStats {
 }
 
 export interface TopicFrequencyData {
-    topics: any[];
+    topics: TopicFrequency[];
     chart_data: {
         labels: string[];
         values: number[];

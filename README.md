@@ -32,7 +32,7 @@
 │  • Dashboard     │     │  └─────────┘  └──────────┘  └─────────┘  │     └──────────┘
 │  • Upload Flow   │     │       │            │             │         │
 │  • Doc Results   │     │  ┌────▼────────────▼─────────────▼─────┐  │     ┌──────────┐
-│  • Analytics     │     │  │         AI Pipeline Layer           │  │     │ ChromaDB │
+│  • Analytics     │     │  │         AI Pipeline Layer           │  │     │ pgvector │
 │  • Interactive   │     │  │                                     │  │────▶│ Vectors  │
 │    Regeneration  │     │  │  PDF Parser → Batch Classifier →    │  │     └──────────┘
 │                  │     │  │  Syllabus Analyzer →                 │  │
@@ -68,7 +68,7 @@ PDF Upload
                                   │
                                   ▼
                     ┌─────────────────────────┐
-                    │   ChromaDB RAG Layer    │
+                    │   pgvector RAG Layer    │
                     │  (semantic retrieval    │
                     │   of similar questions) │
                     └────────────┬────────────┘
@@ -121,13 +121,16 @@ Gemini; everything else is deterministic Python.
                       duration, and question-type mix. Frequencies & trends are then
                       computed in plain Python (Counter), not by the LLM.
 
-7.  INDEX (RAG)     Each historical question + syllabus topic is upserted into
-                    ChromaDB as a vector embedding, tagged with {topic, marks,
-                    session, document_id}. Idempotent (stable IDs → no duplicates).
+7.  INDEX (RAG)     Each historical question + syllabus topic is embedded
+                    (Gemini text-embedding-004) and upserted into the
+                    `vector_chunks` table, tagged with {user_id, document_id,
+                    topic, marks, session}. Idempotent (stable chunk_key → no
+                    duplicates on re-run).
 
-8.  RETRIEVE (RAG)  For the top frequent topics + the course title, ChromaDB returns
-                    the most semantically-similar historical questions (cosine
-                    similarity), deduped and ranked → the "retrieved context".
+8.  RETRIEVE (RAG)  For the top frequent topics + the course title, pgvector
+                    returns the most semantically-similar historical questions
+                    (cosine similarity, HNSW index) — filtered to the requesting
+                    user — deduped and ranked → the "retrieved context".
 
 9.  PREDICT (LLM)   The predictor prompt is assembled from: the actual past papers
                     (verbatim, as the format template) + extracted subject/marks +
@@ -144,8 +147,9 @@ Gemini; everything else is deterministic Python.
 ```
 
 Persistence: **Neon PostgreSQL** holds users, documents, analyses, predictions
-(JSONB columns for the flexible AI payloads). **ChromaDB** holds the question/topic
-vectors. Uploaded files live on disk (or `/tmp` on Vercel).
+(JSONB columns for the flexible AI payloads) **and** the question/topic vectors
+(`vector_chunks`, pgvector). Uploaded files live on local disk, or in **Vercel Blob** when a
+`BLOB_READ_WRITE_TOKEN` is configured (required for reliable serverless uploads).
 
 ---
 
@@ -158,14 +162,14 @@ data. Exyst implements all three explicitly:
 
 | RAG stage        | Where it happens in Exyst                                                             | Implementation                                                                                                                                                                                           |
 | ---------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Retrieval**    | `app/ai/rag.py` → `retrieve_similar_questions()`                                      | ChromaDB embeds every historical question into a vector space; at prediction time we run **cosine-similarity search** over the top topics and the course title to pull the most relevant past questions. |
+| **Retrieval**    | `app/ai/rag.py` → `retrieve_similar_questions()`                                      | Every historical question is embedded into a vector space (pgvector); at prediction time we run a **cosine-similarity search** — scoped to the requesting user — over the top topics and the course title to pull the most relevant past questions. |
 | **Augmentation** | `app/ai/pipelines/predictor.py` → `_format_rag_context()` + `_format_sample_papers()` | The retrieved questions **and** the verbatim past papers are injected into the generation prompt as grounding context.                                                                                   |
 | **Generation**   | `predictor.predict()`                                                                 | Gemini generates a new paper _conditioned on_ that retrieved/injected context — not from generic priors.                                                                                                 |
 
 **What specifically makes it RAG (not just "an LLM call"):**
 
 1. **A vector store is the knowledge base.** Questions are stored as embeddings in
-   ChromaDB, not as plain rows. Retrieval is _semantic_ — "rank correlation" matches
+   Postgres/pgvector, not as plain rows. Retrieval is _semantic_ — "rank correlation" matches
    "Spearman's coefficient" even with no shared keywords.
 2. **Retrieval is query-time and selective.** We don't dump every past question into
    the prompt; we retrieve the top-N most similar ones per topic and dedupe, keeping
@@ -174,7 +178,7 @@ data. Exyst implements all three explicitly:
    topic and a confidence score derived from how strongly the historical corpus
    supports it. The evaluator's "historical alignment" factor measures exactly this.
 
-> Exyst is a **hybrid-grounded** generator: classic vector RAG (ChromaDB retrieval)
+> Exyst is a **hybrid-grounded** generator: classic vector RAG (pgvector retrieval)
 > **plus** in-context grounding (the actual papers as a format template). The vector
 > layer generalizes _across_ papers (semantically similar questions from different
 > sessions); the in-context layer locks the _exact output format_. Together they fix
@@ -191,8 +195,8 @@ The pipeline is deliberately **LLM-frugal** — only 3–4 model calls per full 
 | **Batched classification & extraction** | All pages classified in _one_ call; all papers' topics extracted in _one_ call — not N calls.                                       |
 | **Tiered model routing**                | Heavy generation uses `gemini-2.5-flash`; cheap structured tasks (classification, validation) use `flash-lite`/`gemma`.             |
 | **Model fallback + rotation**           | On 503/429/timeout the client rotates `flash → flash-lite → gemma` instead of hammering one model — resilient to provider overload. |
-| **Adaptive rate-limit tracking**        | Per-model RPM windows pick the least-loaded model first, preserving free-tier quotas.                                               |
-| **Prompt-level response cache**         | Identical prompts (TTL 1h) skip the API entirely.                                                                                   |
+| **Adaptive rate-limit tracking**        | Per-model RPM windows (shared across instances) pick the least-loaded model first, preserving free-tier quotas.                     |
+| **Prompt-level response cache**         | Identical prompts (TTL 1h) skip the API entirely — cached in Postgres, so a hit on any instance serves all of them.                 |
 | **Deterministic where possible**        | Frequencies, trends, marks math, and confidence are computed in Python — the LLM is used only where it adds value.                  |
 | **Async + background + SSE**            | FastAPI is fully async; long runs execute as background tasks with live SSE progress and a polling fallback.                        |
 | **Serverless-aware DB pooling**         | `NullPool` on Vercel/serverless avoids stale Neon connections; a real pool is used on long-lived hosts.                             |
@@ -210,9 +214,6 @@ the path.
 
 - **LLM provider quota** is the hard ceiling — free/standard Gemini tiers cap at a few
   requests/minute. This, not CPU, limits throughput.
-- **Embedded ChromaDB** is a local on-disk store. It does not share across instances
-  and won't survive serverless cold starts.
-- **In-memory cache & rate limiter** live per-process — not shared across replicas.
 - **`BackgroundTasks`** run in the web process; they don't survive a restart, can't
   retry, and don't load-balance.
 - **Local file storage** (`/tmp` on Vercel) is ephemeral and per-instance.
@@ -223,9 +224,9 @@ the path.
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Throughput / LLM limits** | Move to a paid Gemini tier (or provisioned throughput) + a small key pool; queue generation so bursts smooth out. This is the #1 lever.                                                                                             |
 | **Compute**                 | Run the FastAPI app as N stateless replicas behind a load balancer / autoscaler (it already holds no local session state).                                                                                                          |
-| **Vector store**            | Replace embedded ChromaDB with a networked vector DB — **Chroma server, Qdrant, pgvector, or Pinecone** — shared by all replicas. Index **per course, once**, and reuse across every student of that course (huge win — see below). |
+| **Vector store**            | ✅ Done — vectors live in Postgres (pgvector), shared by all replicas. Next: index **per course, once**, and reuse across every student of that course (huge win — see below). |
 | **Jobs**                    | Replace `BackgroundTasks` with a real queue (**Celery/RQ/Cloud Tasks**) + workers: durable, retryable, independently autoscaled, decoupled from the web tier.                                                                       |
-| **Shared state**            | Move the prompt cache + rate limiter to **Redis** so all replicas share quota accounting and cache hits.                                                                                                                            |
+| **Shared state**            | ✅ Done — the prompt cache, per-model RPM pacing, and rate limiters live in Postgres, so all replicas share quota accounting and cache hits.                                                                                          |
 | **Database**                | Neon scales reads via replicas; front it with **PgBouncer** for connection pooling at high concurrency.                                                                                                                             |
 | **File storage**            | Use **S3 / GCS** (object storage) instead of local disk for uploads.                                                                                                                                                                |
 | **Frontend**                | Already CDN-served on Vercel; static + edge-cached.                                                                                                                                                                                 |
@@ -254,7 +255,6 @@ remembers.
 **Cons / current limits**
 
 - Throughput is bounded by the LLM provider's rate limits until you pay for higher tiers.
-- Embedded ChromaDB + in-memory cache/limiter must be externalized before multi-instance scale.
 - `BackgroundTasks` (not a real queue) is fine for moderate load, not for 100k.
 - Prediction quality depends on extraction quality for scanned/image-only PDFs (no OCR yet).
 - Single LLM provider (Gemini) — no cross-provider failover today.
@@ -262,6 +262,10 @@ remembers.
 ---
 
 ## 🔧 Further Processing Optimizations (roadmap)
+
+> 📌 The full, prioritized platform improvement plan — security, infrastructure,
+> product features, frontend engineering, and a 90-day sequencing — lives in
+> [ROADMAP.md](ROADMAP.md). The list below covers pipeline-level optimizations only.
 
 - **Dedup by file hash** — skip the whole pipeline when an identical PDF (or a known
   course's papers) was already processed; serve the cached result. _(hash already computed)_
@@ -288,12 +292,12 @@ remembers.
 | **Frontend** | Next.js 15, React 19, TypeScript, TailwindCSS v4             |
 | **Backend**  | FastAPI, Python 3.11+, Pydantic v2, SQLAlchemy 2.0           |
 | **AI/LLM**   | Google AI Studio / Gemini 2.5 Flash, structured JSON outputs |
-| **RAG**      | ChromaDB (vector embeddings, semantic search)                |
+| **RAG**      | pgvector in Postgres (Gemini `text-embedding-004`, HNSW cosine index) |
 | **Database** | Neon PostgreSQL (serverless, cloud-hosted)                   |
-| **Auth**     | JWT (access + refresh tokens), bcrypt (direct)               |
+| **Auth**     | JWT (in-memory access token + revocable httpOnly-cookie refresh token), bcrypt |
 | **Logging**  | structlog (JSON structured logging)                          |
 | **DevOps**   | Docker Compose, GitHub Actions CI/CD                         |
-| **Testing**  | pytest (16 tests), pytest-asyncio, pytest-cov                |
+| **Testing**  | pytest (79 backend tests), Vitest + ESLint (frontend)        |
 
 ---
 
@@ -318,9 +322,11 @@ cp backend/.env.example backend/.env
 ### 2. Run locally
 
 ```bash
+# One virtualenv at the repo root serves the whole project.
+python -m venv .venv && source .venv/bin/activate
+
 # Backend (terminal 1)
 cd backend
-python -m venv venv && source venv/bin/activate
 pip install -e ".[dev]"
 uvicorn app.main:app --reload
 
@@ -365,11 +371,12 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for the required environment variables, the d
 - **Exam Layout Discovery** — Analyzes historical question papers to determine typical question counts, section structures, and question-type weightings.
 - Topic-to-question frequency mapping and trend detection (rising/falling/consistent).
 
-### RAG Pipeline (ChromaDB)
+### RAG Pipeline (pgvector)
 
-- Historical questions indexed as vector embeddings.
-- Semantic similarity search retrieves relevant past questions to guide predicted questions.
-- Topic clustering and trend analysis.
+- Historical questions and syllabus topics indexed as vector embeddings in Postgres.
+- Semantic similarity (cosine) search retrieves relevant past questions to guide predicted questions.
+- Retrieval is **scoped to the owning user** — one user's questions can never ground another's prediction.
+- Vectors live in the same database as everything else: they survive serverless cold starts, are shared across instances, and are removed automatically when a document is deleted.
 
 ### Dynamic Prediction Pipeline
 
@@ -394,19 +401,27 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for the required environment variables, the d
 
 ---
 
-## 🔌 API Endpoints (17 routes)
+## 🔌 API Endpoints (25 routes)
 
 ```
 Auth:
   POST   /api/v1/auth/register
-  POST   /api/v1/auth/login
-  POST   /api/v1/auth/refresh
+  POST   /api/v1/auth/login            (sets httpOnly refresh cookie)
+  POST   /api/v1/auth/refresh          (cookie or body)
+  POST   /api/v1/auth/logout           (revokes all refresh tokens)
   GET    /api/v1/auth/me
+  PATCH  /api/v1/auth/me               (rename)
+  DELETE /api/v1/auth/me               (delete account + all data)
+  POST   /api/v1/auth/change-password  (requires current password)
+  POST   /api/v1/auth/forgot-password  (emails a reset link)
+  POST   /api/v1/auth/reset-password   (single-use token)
 
 Documents:
   POST   /api/v1/documents/upload
   GET    /api/v1/documents/
   GET    /api/v1/documents/{document_id}
+  PATCH  /api/v1/documents/{document_id}   (rename)
+  DELETE /api/v1/documents/{document_id}
 
 Analysis:
   POST   /api/v1/analysis/{document_id}/run
@@ -434,7 +449,6 @@ Health:
 ```
 exyst/
 ├── docker-compose.yml              # Multi-service orchestration
-├── pyrefly.toml                    # Python type checker config (venv)
 ├── .github/workflows/ci.yml        # CI/CD pipeline
 ├── README.md                       # ← You are here
 │
@@ -460,7 +474,7 @@ exyst/
 │   │   ├── services/               # Business logic layer
 │   │   └── ai/                     # AI pipeline
 │   │       ├── llm_client.py       # Gemini-ready client with retry and rate-limiting retry
-│   │       ├── rag.py              # ChromaDB vector store
+│   │       ├── rag.py              # pgvector vector store
 │   │       ├── evaluation.py       # Confidence scoring (zero-score fallback logic)
 │   │       └── pipelines/          # Processing stages
 │   │           ├── document_processor.py
@@ -468,7 +482,7 @@ exyst/
 │   │           ├── syllabus_analyzer.py
 │   │           ├── pattern_analyzer.py # Exam layout and marks pattern analyzer
 │   │           └── predictor.py    # Pattern-aligned predicted paper generator
-│   ├── tests/                      # 16 tests (API + AI + RAG)
+│   ├── tests/                      # 79 tests (API + AI + RAG)
 │   ├── alembic/                    # DB migrations
 │   ├── pyproject.toml              # Modern Python packaging
 │   ├── Dockerfile
@@ -481,12 +495,15 @@ exyst/
     │   ├── dashboard.tsx           # Overview + stats
     │   ├── upload.tsx              # Upload + pipeline progress
     │   ├── analytics.tsx           # Aggregate analytics
+    │   ├── settings.tsx            # Profile, password, delete account
+    │   ├── forgot-password.tsx     # Request a reset link
+    │   ├── reset-password.tsx      # Set a new password
     │   └── documents/
-    │       ├── index.tsx           # Document list
+    │       ├── index.tsx           # Document list (rename/delete)
     │       └── [id].tsx            # Detail (results/confidence/regeneration UI)
     ├── components/
-    │   ├── layout/AppLayout.tsx    # Sidebar + top bar
-    │   └── ui/                     # Shared UI components
+    │   ├── layout/AppLayout.tsx    # Sidebar + top bar (responsive)
+    │   └── ui/                     # Banner, Spinner, EmptyState
     ├── lib/
     │   ├── api.ts                  # Typed API client (auto-refresh)
     │   └── auth-context.tsx        # React auth context
@@ -500,10 +517,11 @@ exyst/
 ## 🧪 Testing
 
 ```bash
+source .venv/bin/activate      # repo-root venv
 cd backend
-source venv/bin/activate
 
-# Run the backend suite (54 tests)
+# Run the backend suite (79 tests) — needs Postgres with the pgvector extension
+# (e.g. `docker run -p 5432:5432 -e POSTGRES_PASSWORD=… pgvector/pgvector:pg16`)
 pytest tests/ -v
 
 # With coverage report
@@ -518,12 +536,12 @@ mypy app/ --ignore-missing-imports
 
 Backend suites:
 
-- `test_api/test_auth.py` — register, login, refresh rotation, `/me`, invalid/expired tokens, rate-limit
+- `test_api/test_auth.py` — register, login, refresh rotation (cookie + body), logout revocation, `/me`, invalid/expired tokens, rate-limit
 - `test_api/test_documents.py` — upload, list, get, validation, ownership isolation
 - `test_api/test_analysis.py` — 202 contract, background success/failure persistence, ownership
 - `test_api/test_predictions.py` — generate/get error contracts
 - `test_ai/test_pipelines.py` — document processor, classifier (mocked LLM), JSON parsing, evaluator
-- `test_ai/test_rag.py` — ChromaDB indexing, retrieval, idempotency
+- `test_ai/test_rag.py` — pgvector indexing, retrieval, ranking, user-scoping, idempotency, cascade
 
 Frontend tests (Vitest + React Testing Library):
 

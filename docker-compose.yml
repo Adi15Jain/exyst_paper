@@ -7,7 +7,9 @@
 services:
   # --- PostgreSQL Database ---
   postgres:
-    image: postgres:16-alpine
+    # pgvector image (drop-in Postgres 16) — the RAG store needs the `vector`
+    # extension, which stock postgres images don't ship.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: exyst_db
       POSTGRES_USER: exyst

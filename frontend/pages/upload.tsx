@@ -58,7 +58,8 @@ export default function UploadPage() {
     const [currentDetail, setCurrentDetail] = useState("");
     const [currentStage, setCurrentStage] = useState("");
     const [stageLogs, setStageLogs] = useState<StageLog[]>([]);
-    const [completionData, setCompletionData] = useState<any>(null);
+    const [completionData, setCompletionData] =
+        useState<PipelineEvent["data"] | null>(null);
     const startTimeRef = useRef<number>(0);
 
     const handleDrag = useCallback((e: React.DragEvent) => {

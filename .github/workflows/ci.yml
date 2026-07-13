@@ -13,7 +13,9 @@ jobs:
     
     services:
       postgres:
-        image: postgres:16-alpine
+        # pgvector image (drop-in Postgres 16) — the RAG store needs the
+        # `vector` extension, which stock postgres images don't ship.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_DB: exyst_test
           POSTGRES_USER: exyst
@@ -40,7 +42,7 @@ jobs:
 
       - name: Lint with Ruff
         working-directory: ./backend
-        run: ruff check app/
+        run: ruff check app/ tests/
 
       - name: Type check with MyPy
         working-directory: ./backend
