@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from app.api.v1.analysis import router as analysis_router
 from app.api.v1.analytics import router as analytics_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.courses import router as courses_router
 from app.api.v1.documents import router as documents_router
 from app.api.v1.health import router as health_router
 from app.api.v1.predictions import router as predictions_router
@@ -15,6 +16,7 @@ from app.api.v1.stream import router as stream_router
 api_router = APIRouter(prefix="/api/v1")
 
 api_router.include_router(auth_router)
+api_router.include_router(courses_router)
 api_router.include_router(documents_router)
 api_router.include_router(analysis_router)
 api_router.include_router(predictions_router)

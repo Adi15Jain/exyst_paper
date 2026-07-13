@@ -8,6 +8,7 @@ import { useRouter } from "next/router";
 import AppLayout from "@/components/layout/AppLayout";
 import Banner from "@/components/ui/Banner";
 import Spinner from "@/components/ui/Spinner";
+import WorkingIndicator, { PREDICTION_STEPS } from "@/components/ui/WorkingIndicator";
 import { useAuth } from "@/lib/auth-context";
 import {
     documents as documentsApi,
@@ -284,6 +285,14 @@ export default function DocumentDetailPage() {
                 {/* Tab Content */}
                 {activeTab === "prediction" && paper && (
                     <div className="animate-fade-in">
+                        {regenerating && (
+                            <div style={{ marginBottom: 20 }}>
+                                <WorkingIndicator
+                                    steps={PREDICTION_STEPS}
+                                    expectation="Rewriting the paper — usually 30–60 seconds. The current one stays visible until it's ready."
+                                />
+                            </div>
+                        )}
                         {paper.is_fallback ? (
                             <div
                                 className="glass-card"
@@ -1004,8 +1013,18 @@ export default function DocumentDetailPage() {
                     </div>
                 )}
 
+                {/* Generating: a blocking 30-90s LLM call. A bare spinner here
+                    reads as "nothing happened", so show elapsed time, the stage
+                    it's on, and an honest expectation. */}
+                {!prediction && regenerating && (
+                    <WorkingIndicator
+                        steps={PREDICTION_STEPS}
+                        expectation="This usually takes 30–60 seconds. You can leave this tab open."
+                    />
+                )}
+
                 {/* No prediction yet */}
-                {!prediction && !loading && (
+                {!prediction && !loading && !regenerating && (
                     <div
                         className="glass-card"
                         style={{ padding: "60px 24px", textAlign: "center" }}
@@ -1022,7 +1041,8 @@ export default function DocumentDetailPage() {
                                 marginBottom: 20,
                             }}
                         >
-                            Generate a predicted question paper using AI based on the syllabus and past papers.
+                            Exyst will write a new paper in the same format as your past
+                            papers — grounded on the topics that actually keep coming up.
                         </p>
                         <button
                             className="btn-primary"

@@ -98,18 +98,32 @@ document lifecycle. Almost all are 🟠 because their absence is felt immediatel
 This is where Exyst stops being "a prediction generator" and becomes a study platform.
 Ordered by how directly each builds on what already exists.
 
-### 3a. Courses as the organizing unit 🔴/L
+### 3a. Courses as the organizing unit ✅ 2026-07-13
 
-The single highest-leverage product change. Introduce a `Course` entity
-(`user_id, name, code, university, semester`) that owns documents, analyses, and
-predictions:
+The structural change everything else in Phase 3 sits on. A `Course`
+(`user_id, name, code, university, semester`, migration `0005`) is the unit
+papers are filed under.
 
-- Upload syllabus once, add past papers over time; the analysis corpus **grows**.
-- One **shared RAG index per course** (per-course pgvector partition) instead of
-  re-indexing per upload — the scaling story in the README depends on this.
-- Cross-paper trend analysis becomes meaningful (today's first-half/second-half
-  session heuristic is weak because each upload sees only its own papers).
-- Dashboard reorganizes around courses, which matches how students think.
+**Done:**
+- `Course` CRUD (`/api/v1/courses`), a `/courses` page, a course picker on
+  upload, and a course filter on the documents list.
+- `documents.course_id` and `vector_chunks.course_id` (both nullable — existing
+  and deliberately-unfiled papers keep working).
+- **RAG retrieval is now course-scoped.** A prediction for a paper in a course
+  is grounded on that course's *entire corpus* — every paper ever filed under
+  it. The corpus grows with each upload, which is the whole point.
+- **Fixed a real relevance bug in the process:** retrieval was scoped to the
+  whole *user*, so a Physics prediction could be grounded on questions from
+  their Chemistry papers. Unfiled documents now scope to themselves.
+- Deleting a course does **not** delete its papers — they're unfiled
+  (`ON DELETE SET NULL`). Losing a semester of uploads to a tidy-up would be
+  unforgivable.
+
+**Still open (the follow-ons this unlocks):**
+- Cross-paper trend analysis over the course corpus (today's
+  first-half/second-half heuristic still only sees one upload's papers).
+- Dashboard reorganized around courses.
+- Shared/global corpus per course across users (see 1.5 — the big cost lever).
 
 ### 3b. Study tools on top of the analysis (the retention features)
 

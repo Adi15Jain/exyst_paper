@@ -237,6 +237,7 @@ class AnalysisService:
                 db=db,
                 user_id=document.user_id,
                 document_id=document_id,
+                course_id=document.course_id,
                 frequency_result=frequency_result,
                 syllabus_structure=syllabus_structure,
             )
@@ -287,6 +288,7 @@ class AnalysisService:
         db: AsyncSession,
         user_id: UUID,
         document_id: UUID,
+        course_id: UUID | None,
         frequency_result: dict[str, Any],
         syllabus_structure: Any,
     ) -> int:
@@ -314,6 +316,7 @@ class AnalysisService:
                         db=db,
                         user_id=user_id,
                         document_id=document_id,
+                        course_id=course_id,
                         questions=paper_questions,
                         session=session,
                     )
@@ -326,6 +329,7 @@ class AnalysisService:
                             db=db,
                             user_id=user_id,
                             document_id=document_id,
+                            course_id=course_id,
                             topics=unit.topics,
                             unit=f"unit_{unit.unit_number}",
                         )

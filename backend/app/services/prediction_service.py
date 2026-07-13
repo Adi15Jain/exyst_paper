@@ -67,9 +67,9 @@ class PredictionService:
             if progress_callback:
                 await progress_callback(stage, progress, detail)
 
-        # 1. Get completed analysis
+        # 1. Get completed analysis (and the document, for its course)
         stmt = (
-            select(Analysis)
+            select(Analysis, Document)
             .join(Document)
             .where(
                 Document.id == document_id,
@@ -80,12 +80,14 @@ class PredictionService:
             .limit(1)
         )
         result = await db.execute(stmt)
-        analysis = result.scalar_one_or_none()
+        row = result.first()
 
-        if not analysis:
+        if not row:
             raise AnalysisError(
                 "No completed analysis found. Run analysis before generating predictions."
             )
+
+        analysis, document = row
 
         try:
             # 2. Load syllabus structure
@@ -129,12 +131,15 @@ class PredictionService:
             rag_context = await self._retrieve_rag_context(
                 db=db,
                 user_id=user_id,
+                document_id=document_id,
+                course_id=document.course_id,
                 frequency_data=frequency_data,
                 syllabus=syllabus,
             )
             logger.info(
                 "rag_retrieval_complete",
                 document_id=str(document_id),
+                course_id=str(document.course_id) if document.course_id else None,
                 rag_questions_retrieved=len(rag_context),
             )
 
@@ -204,22 +209,35 @@ class PredictionService:
         self,
         db: AsyncSession,
         user_id: UUID,
+        document_id: UUID,
+        course_id: UUID | None,
         frequency_data: dict[str, Any],
         syllabus: SyllabusStructure,
     ) -> list[dict[str, Any]]:
         """
         Retrieve semantically similar historical questions from the vector store.
 
-        Queries the top frequent topics and the syllabus course title to build
-        a rich context of relevant past questions. Retrieval is scoped to this
-        user's chunks, so another user's questions can never leak into the
-        prompt. RAG is optional — any failure yields an empty context and the
-        prediction proceeds ungrounded.
+        **Scope matters here.** If the document is filed under a course, we
+        retrieve across that course's entire corpus — every paper the student
+        has ever uploaded for that subject. That is the point of courses: the
+        corpus grows, and each prediction is grounded in more history.
+
+        If it isn't filed, we scope to the document itself. Retrieving across
+        *everything the user owns* (the previous behaviour) meant a Physics
+        prediction could be grounded on questions from their Chemistry papers —
+        semantically similar text from an unrelated subject is worse than no
+        context at all.
+
+        Always scoped to `user_id` regardless, so another user's questions can
+        never reach the prompt. RAG is optional — any failure yields an empty
+        context and the prediction proceeds ungrounded.
         """
         try:
             rag = RAGStore()
 
-            if await rag.count(db, user_id) == 0:
+            scope = {"course_id": course_id} if course_id else {"document_id": document_id}
+
+            if await rag.count(db, user_id, **scope) == 0:
                 logger.info("rag_empty_skipping_retrieval")
                 return []
 
@@ -236,7 +254,7 @@ class PredictionService:
 
             for query in queries:
                 results = await rag.retrieve_similar_questions(
-                    db=db, user_id=user_id, query=query, n_results=5
+                    db=db, user_id=user_id, query=query, n_results=5, **scope
                 )
                 for r in results:
                     text_key = r.get("text", "")[:100]

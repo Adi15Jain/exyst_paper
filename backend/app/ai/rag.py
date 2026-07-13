@@ -54,6 +54,7 @@ class RAGStore:
         document_id: UUID,
         questions: list[dict[str, Any]],
         session: str = "unknown",
+        course_id: UUID | None = None,
     ) -> int:
         """
         Embed and store extracted questions. Returns the number indexed.
@@ -76,6 +77,7 @@ class RAGStore:
             rows.append({
                 "user_id": user_id,
                 "document_id": document_id,
+                "course_id": course_id,
                 "kind": ChunkKind.QUESTION.value,
                 "chunk_key": f"{document_id}:question:{session}:{i}",
                 "content": text,
@@ -97,6 +99,7 @@ class RAGStore:
         document_id: UUID,
         topics: list[str],
         unit: str = "unknown",
+        course_id: UUID | None = None,
     ) -> int:
         """Embed and store syllabus topics. Returns the number indexed."""
         texts: list[str] = []
@@ -109,6 +112,7 @@ class RAGStore:
             rows.append({
                 "user_id": user_id,
                 "document_id": document_id,
+                "course_id": course_id,
                 "kind": ChunkKind.TOPIC.value,
                 "chunk_key": f"{document_id}:topic:{unit}:{i}",
                 "content": topic,
@@ -138,6 +142,7 @@ class RAGStore:
                 "content": stmt.excluded.content,
                 "chunk_metadata": stmt.excluded.chunk_metadata,
                 "embedding": stmt.excluded.embedding,
+                "course_id": stmt.excluded.course_id,
             },
         )
         await db.execute(stmt)
@@ -154,11 +159,13 @@ class RAGStore:
         query: str,
         n_results: int = 10,
         document_id: UUID | None = None,
+        course_id: UUID | None = None,
     ) -> list[dict[str, Any]]:
         """
         Semantically retrieve a user's historical questions matching ``query``.
 
-        Always scoped to ``user_id``; optionally narrowed to one document.
+        Always scoped to ``user_id``, and narrowed further to a course (its
+        whole corpus) or a single document when given.
         """
         chunks = await self._search(
             db,
@@ -167,6 +174,7 @@ class RAGStore:
             query=query,
             n_results=n_results,
             document_id=document_id,
+            course_id=course_id,
         )
         return [
             {
@@ -186,6 +194,7 @@ class RAGStore:
         query: str,
         n_results: int = 5,
         document_id: UUID | None = None,
+        course_id: UUID | None = None,
     ) -> list[dict[str, Any]]:
         """Semantically retrieve a user's syllabus topics related to ``query``."""
         chunks = await self._search(
@@ -195,6 +204,7 @@ class RAGStore:
             query=query,
             n_results=n_results,
             document_id=document_id,
+            course_id=course_id,
         )
         return [
             {
@@ -213,6 +223,7 @@ class RAGStore:
         query: str,
         n_results: int,
         document_id: UUID | None = None,
+        course_id: UUID | None = None,
     ) -> list[tuple[str, dict[str, Any] | None, float]]:
         if not query or not query.strip():
             return []
@@ -233,7 +244,11 @@ class RAGStore:
             .order_by(distance)
             .limit(n_results)
         )
-        if document_id is not None:
+        # A course scopes retrieval to that subject's whole corpus (every paper
+        # filed under it); a document scopes it to just that upload.
+        if course_id is not None:
+            stmt = stmt.where(VectorChunk.course_id == course_id)
+        elif document_id is not None:
             stmt = stmt.where(VectorChunk.document_id == document_id)
 
         result = await db.execute(stmt)
@@ -259,8 +274,10 @@ class RAGStore:
         db: AsyncSession,
         user_id: UUID,
         kind: ChunkKind | None = None,
+        course_id: UUID | None = None,
+        document_id: UUID | None = None,
     ) -> int:
-        """How many chunks this user has indexed (optionally of one kind)."""
+        """How many chunks are indexed in a given scope."""
         stmt = (
             select(func.count())
             .select_from(VectorChunk)
@@ -268,6 +285,10 @@ class RAGStore:
         )
         if kind is not None:
             stmt = stmt.where(VectorChunk.kind == kind.value)
+        if course_id is not None:
+            stmt = stmt.where(VectorChunk.course_id == course_id)
+        if document_id is not None:
+            stmt = stmt.where(VectorChunk.document_id == document_id)
         result = await db.execute(stmt)
         return result.scalar() or 0
 

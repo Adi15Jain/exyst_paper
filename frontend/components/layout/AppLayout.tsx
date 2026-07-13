@@ -15,6 +15,7 @@ interface AppLayoutProps {
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: "📊" },
+  { href: "/courses", label: "Courses", icon: "🎓" },
   { href: "/upload", label: "Upload", icon: "📄" },
   { href: "/documents", label: "Documents", icon: "📁" },
   { href: "/analytics", label: "Analytics", icon: "📈" },

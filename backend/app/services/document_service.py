@@ -13,9 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
-from app.core.exceptions import DocumentNotFoundError, DocumentUploadError
+from app.core.exceptions import DocumentNotFoundError, DocumentUploadError, NotFoundError
 from app.core.logging import get_logger
-from app.models import Analysis, Document, ProcessingStatus
+from app.models import Analysis, Course, Document, ProcessingStatus
 from app.schemas.document import DocumentListResponse, DocumentResponse, DocumentUploadResponse
 from app.services.storage import delete_stored_file, save_upload
 
@@ -35,13 +35,27 @@ class DocumentService:
         filename: str,
         file_content: bytes,
         db: AsyncSession,
+        course_id: UUID | None = None,
     ) -> DocumentUploadResponse:
         """
         Save an uploaded file and create a database record.
 
+        `course_id` files the paper under a course, so it joins that course's
+        corpus for retrieval. Optional — documents can stay unfiled.
+
         Raises:
             DocumentUploadError: If file validation fails.
+            NotFoundError: If course_id isn't a course this user owns.
         """
+        if course_id is not None:
+            # Verify ownership: filing a paper into someone else's course would
+            # inject it into their retrieval corpus.
+            result = await db.execute(
+                select(Course).where(Course.id == course_id, Course.user_id == user_id)
+            )
+            if result.scalar_one_or_none() is None:
+                raise NotFoundError("Course", str(course_id))
+
         # Validate
         if not filename.lower().endswith(".pdf"):
             raise DocumentUploadError("Only PDF files are accepted")
@@ -95,6 +109,7 @@ class DocumentService:
         # Create DB record
         document = Document(
             user_id=user_id,
+            course_id=course_id,
             filename=stored_filename,
             original_filename=filename,
             file_path=file_path,
@@ -237,12 +252,15 @@ class DocumentService:
         db: AsyncSession,
         page: int = 1,
         per_page: int = 20,
+        course_id: UUID | None = None,
     ) -> DocumentListResponse:
-        """List all documents for a user with pagination."""
+        """List a user's documents with pagination, optionally scoped to a course."""
+        filters = [Document.user_id == user_id]
+        if course_id is not None:
+            filters.append(Document.course_id == course_id)
+
         # Count total
-        count_stmt = select(func.count()).select_from(Document).where(
-            Document.user_id == user_id
-        )
+        count_stmt = select(func.count()).select_from(Document).where(*filters)
         total_result = await db.execute(count_stmt)
         total = total_result.scalar() or 0
 
@@ -250,7 +268,7 @@ class DocumentService:
         offset = (page - 1) * per_page
         stmt = (
             select(Document)
-            .where(Document.user_id == user_id)
+            .where(*filters)
             .options(
                 selectinload(Document.analyses).selectinload(Analysis.predictions)
             )
@@ -270,6 +288,7 @@ class DocumentService:
                 status=doc.status.value,
                 error_message=cast(Any, doc.error_message),
                 uploaded_at=cast(Any, doc.uploaded_at),
+                course_id=cast(Any, doc.course_id),
                 has_analysis=bool(doc.analyses),
                 has_prediction=any(
                     bool(a.predictions) for a in doc.analyses

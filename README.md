@@ -297,7 +297,7 @@ remembers.
 | **Auth**     | JWT (in-memory access token + revocable httpOnly-cookie refresh token), bcrypt |
 | **Logging**  | structlog (JSON structured logging)                          |
 | **DevOps**   | Docker Compose, GitHub Actions CI/CD                         |
-| **Testing**  | pytest (79 backend tests), Vitest + ESLint (frontend)        |
+| **Testing**  | pytest (98 backend tests), Vitest + ESLint (frontend)        |
 
 ---
 
@@ -401,9 +401,16 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for the required environment variables, the d
 
 ---
 
-## 🔌 API Endpoints (25 routes)
+## 🔌 API Endpoints (30 routes)
 
 ```
+Courses:
+  POST   /api/v1/courses/
+  GET    /api/v1/courses/
+  GET    /api/v1/courses/{course_id}
+  PATCH  /api/v1/courses/{course_id}
+  DELETE /api/v1/courses/{course_id}   (papers are kept, just unfiled)
+
 Auth:
   POST   /api/v1/auth/register
   POST   /api/v1/auth/login            (sets httpOnly refresh cookie)
@@ -520,7 +527,7 @@ exyst/
 source .venv/bin/activate      # repo-root venv
 cd backend
 
-# Run the backend suite (79 tests) — needs Postgres with the pgvector extension
+# Run the backend suite (98 tests) — needs Postgres with the pgvector extension
 # (e.g. `docker run -p 5432:5432 -e POSTGRES_PASSWORD=… pgvector/pgvector:pg16`)
 pytest tests/ -v
 
@@ -537,7 +544,8 @@ mypy app/ --ignore-missing-imports
 Backend suites:
 
 - `test_api/test_auth.py` — register, login, refresh rotation (cookie + body), logout revocation, `/me`, invalid/expired tokens, rate-limit
-- `test_api/test_documents.py` — upload, list, get, validation, ownership isolation
+- `test_api/test_courses.py` — course CRUD, ownership isolation, filing papers, delete-keeps-papers
+- `test_api/test_documents.py` — upload, list, get, validation, ownership isolation, dedup
 - `test_api/test_analysis.py` — 202 contract, background success/failure persistence, ownership
 - `test_api/test_predictions.py` — generate/get error contracts
 - `test_ai/test_pipelines.py` — document processor, classifier (mocked LLM), JSON parsing, evaluator

@@ -7,9 +7,11 @@ import Head from "next/head";
 import { useRouter } from "next/router";
 import AppLayout from "@/components/layout/AppLayout";
 import Banner from "@/components/ui/Banner";
+import GettingStarted from "@/components/ui/GettingStarted";
 import { useAuth } from "@/lib/auth-context";
 import {
     analytics as analyticsApi,
+    courses as coursesApi,
     documents as documentsApi,
     OverviewStats,
     DocumentData,
@@ -20,6 +22,8 @@ export default function DashboardPage() {
     const { user, loading: authLoading } = useAuth();
     const [stats, setStats] = useState<OverviewStats | null>(null);
     const [recentDocs, setRecentDocs] = useState<DocumentData[]>([]);
+    const [courseCount, setCourseCount] = useState(0);
+    const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState(false);
     const [reloadKey, setReloadKey] = useState(0);
 
@@ -31,16 +35,21 @@ export default function DashboardPage() {
         }
 
         setLoadError(false);
+        setLoading(true);
 
         Promise.all([
             analyticsApi.overview().catch(() => null),
             documentsApi.list(1, 5).catch(() => null),
-        ]).then(([statsData, docsData]) => {
-            if (statsData) setStats(statsData);
-            if (docsData) setRecentDocs(docsData.documents);
-            // Both failing means the backend is unreachable, not just empty data.
-            if (!statsData && !docsData) setLoadError(true);
-        });
+            coursesApi.list().catch(() => null),
+        ])
+            .then(([statsData, docsData, courseData]) => {
+                if (statsData) setStats(statsData);
+                if (docsData) setRecentDocs(docsData.documents);
+                if (courseData) setCourseCount(courseData.total);
+                // Both failing means the backend is unreachable, not just empty data.
+                if (!statsData && !docsData) setLoadError(true);
+            })
+            .finally(() => setLoading(false));
     }, [user, authLoading, router, reloadKey]);
 
     if (authLoading || !user) return null;
@@ -88,9 +97,20 @@ export default function DashboardPage() {
                             fontSize: "0.9rem",
                         }}
                     >
-                        Here&apos;s your exam intelligence overview
+                        Your exam papers, and what Exyst has learned from them
                     </p>
                 </div>
+
+                {/* Until there's a first prediction, the dashboard leads with
+                    guidance instead of a wall of zeroes. It disappears for good
+                    once the user has been through the loop once. */}
+                {!loading && !loadError && (stats?.predictions.total ?? 0) === 0 && (
+                    <GettingStarted
+                        hasCourse={courseCount > 0}
+                        hasDocument={(stats?.documents.total ?? 0) > 0}
+                        hasPrediction={(stats?.predictions.total ?? 0) > 0}
+                    />
+                )}
 
                 {/* Stats Grid */}
                 <div
@@ -107,18 +127,21 @@ export default function DashboardPage() {
                         value={stats?.documents.total ?? 0}
                         label="Documents"
                         delay={1}
+                        loading={loading}
                     />
                     <StatCard
                         icon="🔬"
                         value={stats?.analyses.completed ?? 0}
                         label="Analyses Complete"
                         delay={2}
+                        loading={loading}
                     />
                     <StatCard
                         icon="🎯"
                         value={stats?.predictions.total ?? 0}
                         label="Predictions"
                         delay={3}
+                        loading={loading}
                     />
                     <StatCard
                         icon="📊"
@@ -130,6 +153,7 @@ export default function DashboardPage() {
                         label="Avg Confidence"
                         gradient
                         delay={4}
+                        loading={loading}
                     />
                 </div>
 
@@ -324,12 +348,16 @@ function StatCard({
     label,
     gradient,
     delay,
+    loading,
 }: {
     icon: string;
     value: number | string;
     label: string;
     gradient?: boolean;
     delay: number;
+    /** While loading, show a placeholder — rendering "0" would state a fact we
+        don't yet know, and it flickers to the real number a moment later. */
+    loading?: boolean;
 }) {
     return (
         <div
@@ -346,12 +374,20 @@ function StatCard({
             >
                 <span style={{ fontSize: "1.5rem" }}>{icon}</span>
             </div>
-            <div
-                className={gradient ? "text-gradient" : ""}
-                style={{ fontSize: "2rem", fontWeight: 800, lineHeight: 1.1 }}
-            >
-                {value}
-            </div>
+            {loading ? (
+                <div
+                    className="skeleton"
+                    style={{ height: "2rem", width: 64 }}
+                    aria-hidden="true"
+                />
+            ) : (
+                <div
+                    className={gradient ? "text-gradient" : ""}
+                    style={{ fontSize: "2rem", fontWeight: 800, lineHeight: 1.1 }}
+                >
+                    {value}
+                </div>
+            )}
             <div className="stat-label">{label}</div>
         </div>
     );

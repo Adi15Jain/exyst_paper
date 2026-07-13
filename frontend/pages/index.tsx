@@ -161,11 +161,10 @@ export default function LandingPage() {
                                 letterSpacing: "-0.03em",
                             }}
                         >
-                            Predict Your Next{" "}
+                            Study the questions that{" "}
                             <span className="text-gradient">
-                                Exam Questions
-                            </span>{" "}
-                            With AI
+                                actually come up
+                            </span>
                         </h1>
 
                         {/* Subtitle */}
@@ -182,9 +181,11 @@ export default function LandingPage() {
                                 opacity: 0,
                             }}
                         >
-                            Upload your syllabus and past question papers. Our
-                            AI analyzes topic frequency, detects trends, and
-                            generates predicted papers with confidence scoring.
+                            Exyst reads your syllabus and past question papers, works out
+                            which topics your examiners keep returning to, and writes you a
+                            realistic practice paper in the <strong>exact format</strong> of
+                            the real one — with a confidence score on every question, so you
+                            know what to trust.
                         </p>
 
                         {/* CTA Buttons */}
@@ -253,9 +254,14 @@ export default function LandingPage() {
                             color: "var(--text-muted)",
                             fontSize: "0.95rem",
                             marginBottom: 48,
+                            maxWidth: 620,
+                            marginLeft: "auto",
+                            marginRight: "auto",
+                            lineHeight: 1.6,
                         }}
                     >
-                        Three steps to smarter exam preparation
+                        Upload once. Exyst does the rest in about a minute — and shows you
+                        its working at every step, so nothing is a black box.
                     </p>
 
                     <div
@@ -268,18 +274,81 @@ export default function LandingPage() {
                     >
                         <FeatureCard
                             icon="📤"
-                            title="1. Upload"
-                            description="Drop your combined PDF — syllabus and past question papers. Our AI automatically classifies each page."
+                            title="1. Upload your papers"
+                            description="Drop in one PDF with your syllabus and past question papers. Exyst reads every page and works out which is which — you don't have to split anything up."
                         />
                         <FeatureCard
-                            icon="🧠"
-                            title="2. Analyze"
-                            description="LLM-powered analysis extracts topics, detects frequency patterns, and identifies rising trends across papers."
+                            icon="🔍"
+                            title="2. It finds the pattern"
+                            description="It pulls out every question ever asked, tags it by topic, and counts. Which topics repeat, which are climbing, how marks are split, how the paper is structured. This part is arithmetic — not guesswork."
                         />
                         <FeatureCard
                             icon="🎯"
-                            title="3. Predict"
-                            description="Get a complete predicted question paper with per-question confidence scores and topic coverage analysis."
+                            title="3. You get a real paper"
+                            description="A complete practice paper in your exam's exact format — same sections, same marks, same style — with a confidence score on every question and the evidence behind it."
+                        />
+                    </div>
+                </div>
+
+                {/* Why Exyst — head off the obvious objection: "why not just ask ChatGPT?" */}
+                <div
+                    style={{
+                        position: "relative",
+                        zIndex: 10,
+                        padding: "20px 24px 80px",
+                        maxWidth: 1000,
+                        margin: "0 auto",
+                    }}
+                >
+                    <h2
+                        style={{
+                            textAlign: "center",
+                            fontSize: "2rem",
+                            fontWeight: 800,
+                            marginBottom: 12,
+                            letterSpacing: "-0.02em",
+                        }}
+                    >
+                        Why not just ask ChatGPT?
+                    </h2>
+                    <p
+                        style={{
+                            textAlign: "center",
+                            color: "var(--text-muted)",
+                            fontSize: "0.95rem",
+                            marginBottom: 48,
+                            maxWidth: 620,
+                            marginLeft: "auto",
+                            marginRight: "auto",
+                            lineHeight: 1.6,
+                        }}
+                    >
+                        You can. It will happily invent ten plausible questions. The
+                        difference is what those questions are based on.
+                    </p>
+
+                    <div
+                        style={{
+                            display: "grid",
+                            gridTemplateColumns:
+                                "repeat(auto-fit, minmax(280px, 1fr))",
+                            gap: 24,
+                        }}
+                    >
+                        <FeatureCard
+                            icon="📊"
+                            title="Grounded in your papers"
+                            description="Every prediction is built from questions your examiners actually set. A general chatbot has never seen your course's papers — it's pattern-matching on the internet, then guessing."
+                        />
+                        <FeatureCard
+                            icon="📐"
+                            title="Your exam's real format"
+                            description="Same sections, same question count, same marks, same 'Or' choices. Predicted papers total to 60 or 100 because your papers do — not because a model felt like it."
+                        />
+                        <FeatureCard
+                            icon="🧾"
+                            title="It shows its working"
+                            description="Topic frequencies, rising and falling trends, per-question confidence and coverage. When a prediction is weak, Exyst tells you — instead of sounding equally certain about everything."
                         />
                     </div>
                 </div>

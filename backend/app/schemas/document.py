@@ -37,6 +37,7 @@ class DocumentResponse(BaseModel):
     status: str
     error_message: str | None = None
     uploaded_at: datetime
+    course_id: UUID | None = None
     has_analysis: bool = False
     has_prediction: bool = False
 

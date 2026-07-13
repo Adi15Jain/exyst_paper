@@ -13,7 +13,7 @@ import pytest_asyncio
 from sqlalchemy import select
 
 from app.ai.rag import RAGStore
-from app.models import ChunkKind, Document, ProcessingStatus, User, VectorChunk
+from app.models import ChunkKind, Course, Document, ProcessingStatus, User, VectorChunk
 from tests.conftest import FakeEmbedder
 
 QUESTIONS = [
@@ -212,3 +212,129 @@ async def test_chunks_are_deleted_with_their_document(rag, db_session, owner):
         select(VectorChunk).where(VectorChunk.document_id == document.id)
     )
     assert remaining.scalars().all() == []
+
+
+# --- Course-scoped retrieval (ROADMAP 3a) ---
+
+
+async def _make_course(db_session, user: User, name: str) -> Course:
+    course = Course(user_id=user.id, name=name)
+    db_session.add(course)
+    await db_session.flush()
+    return course
+
+
+async def _make_document(db_session, user: User, course: Course | None = None) -> Document:
+    document = Document(
+        user_id=user.id,
+        course_id=course.id if course else None,
+        filename="p.pdf",
+        original_filename="p.pdf",
+        file_path="/tmp/p.pdf",
+        file_size_bytes=10,
+        status=ProcessingStatus.PENDING,
+    )
+    db_session.add(document)
+    await db_session.flush()
+    return document
+
+
+@pytest.mark.asyncio
+async def test_course_retrieval_spans_every_paper_in_the_course(rag, db_session):
+    """
+    The whole point of courses: papers accumulate into one corpus, so a
+    prediction is grounded on the course's full history, not just the one
+    upload it was generated from.
+    """
+    user, _ = await _make_user_with_document(db_session)
+    course = await _make_course(db_session, user, "Machine Learning")
+
+    paper_2023 = await _make_document(db_session, user, course)
+    paper_2024 = await _make_document(db_session, user, course)
+
+    await rag.index_questions(
+        db_session, user.id, paper_2023.id,
+        [{"question_text": "Explain genetic algorithms", "topic": "GA"}],
+        session="2023-24", course_id=course.id,
+    )
+    await rag.index_questions(
+        db_session, user.id, paper_2024.id,
+        [{"question_text": "Describe crossover operators", "topic": "GA"}],
+        session="2024-25", course_id=course.id,
+    )
+
+    # Query overlaps both papers. (The FakeEmbedder is bag-of-words, so the
+    # query has to share tokens with each to clear MIN_SIMILARITY — a real
+    # embedder would match "crossover" to "genetic algorithms" semantically.)
+    results = await rag.retrieve_similar_questions(
+        db_session,
+        user.id,
+        "genetic algorithms crossover operators",
+        course_id=course.id,
+    )
+
+    # Both years' papers are retrievable from the single course scope.
+    sessions = {r["session"] for r in results}
+    assert sessions == {"2023-24", "2024-25"}
+
+
+@pytest.mark.asyncio
+async def test_course_scope_excludes_other_subjects(rag, db_session):
+    """
+    Regression guard. Retrieval used to be scoped to the whole *user*, so a
+    Physics prediction could be grounded on their Chemistry questions —
+    semantically-near text from an unrelated subject is worse than none.
+    """
+    user, _ = await _make_user_with_document(db_session)
+    physics = await _make_course(db_session, user, "Physics")
+    chemistry = await _make_course(db_session, user, "Chemistry")
+
+    physics_paper = await _make_document(db_session, user, physics)
+    chem_paper = await _make_document(db_session, user, chemistry)
+
+    await rag.index_questions(
+        db_session, user.id, physics_paper.id,
+        [{"question_text": "State the laws of thermodynamics", "topic": "Thermo"}],
+        course_id=physics.id,
+    )
+    await rag.index_questions(
+        db_session, user.id, chem_paper.id,
+        [{"question_text": "Explain thermodynamics of reactions", "topic": "Thermo"}],
+        course_id=chemistry.id,
+    )
+
+    results = await rag.retrieve_similar_questions(
+        db_session, user.id, "thermodynamics", course_id=physics.id
+    )
+
+    assert len(results) == 1
+    assert "laws of thermodynamics" in results[0]["text"]
+    assert all("reactions" not in r["text"] for r in results)
+
+
+@pytest.mark.asyncio
+async def test_unfiled_documents_are_not_pulled_into_a_course(rag, db_session):
+    user, _ = await _make_user_with_document(db_session)
+    course = await _make_course(db_session, user, "Machine Learning")
+
+    filed = await _make_document(db_session, user, course)
+    unfiled = await _make_document(db_session, user, None)
+
+    await rag.index_questions(
+        db_session, user.id, filed.id,
+        [{"question_text": "Explain genetic algorithms in depth", "topic": "GA"}],
+        course_id=course.id,
+    )
+    await rag.index_questions(
+        db_session, user.id, unfiled.id,
+        [{"question_text": "Explain genetic algorithms briefly", "topic": "GA"}],
+        course_id=None,
+    )
+
+    results = await rag.retrieve_similar_questions(
+        db_session, user.id, "genetic algorithms", course_id=course.id
+    )
+    assert len(results) == 1
+    assert "in depth" in results[0]["text"]
+
+    assert await rag.count(db_session, user.id, course_id=course.id) == 1

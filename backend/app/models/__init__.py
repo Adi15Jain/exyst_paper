@@ -64,9 +64,62 @@ class User(Base):
 
     # Relationships
     documents = relationship("Document", back_populates="user", cascade="all, delete-orphan")
+    courses = relationship("Course", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<User {self.email}>"
+
+
+# --- Course Model ---
+
+
+class Course(Base):
+    """
+    A subject a student is studying — the organizing unit of the platform.
+
+    Documents belong to a course, so past papers accumulate into a growing
+    corpus instead of each upload being an isolated one-shot. That corpus is
+    what RAG retrieval is scoped to: a prediction for a Physics paper is
+    grounded on the Physics papers, not on everything the user has ever
+    uploaded.
+
+    `course_id` is nullable on Document — documents uploaded before courses
+    existed (or deliberately left unfiled) keep working.
+    """
+
+    __tablename__ = "courses"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name = Column(String(255), nullable=False)
+    code = Column(String(50), nullable=True)          # e.g. "EAI602"
+    university = Column(String(255), nullable=True)
+    semester = Column(String(50), nullable=True)      # e.g. "6th", "2024-25 ODD"
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    # Relationships
+    user = relationship("User", back_populates="courses")
+    # Deleting a course does NOT delete its documents — they're just unfiled
+    # (course_id set to NULL). Losing a semester of uploads because you renamed
+    # a course wrong would be unforgivable.
+    documents = relationship("Document", back_populates="course")
+
+    def __repr__(self) -> str:
+        return f"<Course {self.name}>"
 
 
 # --- Document Model ---
@@ -77,6 +130,14 @@ class Document(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    # Nullable: documents can be unfiled (and every document uploaded before
+    # courses existed is). Deleting a course nulls this rather than cascading.
+    course_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("courses.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     filename = Column(String(500), nullable=False)
     original_filename = Column(String(500), nullable=False)
     file_path = Column(String(1000), nullable=False)
@@ -96,6 +157,7 @@ class Document(Base):
 
     # Relationships
     user = relationship("User", back_populates="documents")
+    course = relationship("Course", back_populates="documents")
     analyses = relationship("Analysis", back_populates="document", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
@@ -231,6 +293,14 @@ class VectorChunk(Base):
         UUID(as_uuid=True),
         ForeignKey("documents.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
+    )
+    # Denormalized from the document so retrieval can filter to a course's whole
+    # corpus with an index hit instead of a join. Nullable for unfiled documents.
+    course_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("courses.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
     kind = Column(String(20), nullable=False, index=True)

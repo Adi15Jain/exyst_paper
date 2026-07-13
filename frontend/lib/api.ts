@@ -237,6 +237,7 @@ export interface DocumentData {
     status: string;
     error_message?: string;
     uploaded_at: string;
+    course_id?: string | null;
     has_analysis?: boolean;
     has_prediction?: boolean;
 }
@@ -249,19 +250,25 @@ export interface DocumentListResponse {
 }
 
 export const documents = {
-    upload: (file: File) => {
+    upload: (file: File, courseId?: string) => {
         const formData = new FormData();
         formData.append("file", file);
+        // Files the paper under a course, so it joins that course's corpus.
+        if (courseId) formData.append("course_id", courseId);
         return apiFetch<DocumentData>("/documents/upload", {
             method: "POST",
             body: formData,
         });
     },
 
-    list: (page = 1, perPage = 20) =>
-        apiFetch<DocumentListResponse>(
-            `/documents/?page=${page}&per_page=${perPage}`,
-        ),
+    list: (page = 1, perPage = 20, courseId?: string) => {
+        const params = new URLSearchParams({
+            page: String(page),
+            per_page: String(perPage),
+        });
+        if (courseId) params.set("course_id", courseId);
+        return apiFetch<DocumentListResponse>(`/documents/?${params}`);
+    },
 
     get: (id: string) => apiFetch<DocumentData>(`/documents/${id}`),
 
@@ -564,4 +571,51 @@ export const pipeline = {
             }
         }
     },
+};
+
+// --- Courses API ---
+
+/** A subject the student is studying — the unit papers are filed under. */
+export interface Course {
+    id: string;
+    name: string;
+    code?: string | null;
+    university?: string | null;
+    semester?: string | null;
+    document_count: number;
+    created_at: string;
+}
+
+export interface CourseListResponse {
+    courses: Course[];
+    total: number;
+}
+
+export interface CourseInput {
+    name: string;
+    code?: string | null;
+    university?: string | null;
+    semester?: string | null;
+}
+
+export const courses = {
+    list: () => apiFetch<CourseListResponse>("/courses/"),
+
+    get: (id: string) => apiFetch<Course>(`/courses/${id}`),
+
+    create: (data: CourseInput) =>
+        apiFetch<Course>("/courses/", {
+            method: "POST",
+            body: JSON.stringify(data),
+        }),
+
+    update: (id: string, data: Partial<CourseInput>) =>
+        apiFetch<Course>(`/courses/${id}`, {
+            method: "PATCH",
+            body: JSON.stringify(data),
+        }),
+
+    /** Deletes the course only — its papers survive, simply unfiled. */
+    delete: (id: string) =>
+        apiFetch<void>(`/courses/${id}`, { method: "DELETE" }),
 };

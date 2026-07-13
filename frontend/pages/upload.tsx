@@ -3,16 +3,19 @@
  * with real-time SSE streaming progress.
  */
 
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import Head from "next/head";
+import Link from "next/link";
 import { useRouter } from "next/router";
 import AppLayout from "@/components/layout/AppLayout";
 import { useAuth } from "@/lib/auth-context";
 import {
     documents,
+    courses as coursesApi,
     pipeline,
     analysis as analysisApi,
     predictions as predictionsApi,
+    Course,
     PipelineEvent,
 } from "@/lib/api";
 
@@ -51,6 +54,8 @@ export default function UploadPage() {
     const router = useRouter();
     const { user, loading: authLoading } = useAuth();
     const [file, setFile] = useState<File | null>(null);
+    const [courseList, setCourseList] = useState<Course[]>([]);
+    const [courseId, setCourseId] = useState<string>("");
     const [dragActive, setDragActive] = useState(false);
     const [stage, setStage] = useState<PipelineStage>("idle");
     const [error, setError] = useState("");
@@ -61,6 +66,20 @@ export default function UploadPage() {
     const [completionData, setCompletionData] =
         useState<PipelineEvent["data"] | null>(null);
     const startTimeRef = useRef<number>(0);
+
+    // Load the user's courses so the paper can be filed on upload.
+    useEffect(() => {
+        if (!user) return;
+        coursesApi
+            .list()
+            .then((data) => {
+                setCourseList(data.courses);
+                // Arriving from a course page pre-selects that course.
+                const fromQuery = router.query.course;
+                if (typeof fromQuery === "string") setCourseId(fromQuery);
+            })
+            .catch(() => setCourseList([]));
+    }, [user, router.query.course]);
 
     const handleDrag = useCallback((e: React.DragEvent) => {
         e.preventDefault();
@@ -166,7 +185,7 @@ export default function UploadPage() {
             setCurrentStage("uploading");
             setProgress(5);
 
-            const doc = await documents.upload(file);
+            const doc = await documents.upload(file, courseId || undefined);
             docId = doc.id;
 
             // Stage 2: Stream analysis + prediction
@@ -399,6 +418,65 @@ export default function UploadPage() {
                                 {error}
                             </div>
                         )}
+
+                        {/* Course selector — files the paper into a subject's
+                            corpus, so predictions are grounded on that subject's
+                            history rather than everything you've uploaded. */}
+                        <div style={{ marginTop: 20 }}>
+                            <label
+                                htmlFor="course-select"
+                                style={{
+                                    display: "block",
+                                    fontSize: "0.8rem",
+                                    fontWeight: 600,
+                                    color: "var(--text-secondary)",
+                                    marginBottom: 6,
+                                }}
+                            >
+                                Course{" "}
+                                <span style={{ fontWeight: 400 }}>(optional)</span>
+                            </label>
+                            <select
+                                id="course-select"
+                                className="input-field"
+                                value={courseId}
+                                onChange={(e) => setCourseId(e.target.value)}
+                                disabled={isProcessing}
+                                style={{ width: "100%" }}
+                            >
+                                <option value="">
+                                    — Not filed under a course —
+                                </option>
+                                {courseList.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.name}
+                                        {c.code ? ` (${c.code})` : ""}
+                                    </option>
+                                ))}
+                            </select>
+                            <p
+                                style={{
+                                    margin: "6px 0 0",
+                                    fontSize: "0.7rem",
+                                    color: "var(--text-muted)",
+                                }}
+                            >
+                                {courseList.length === 0 ? (
+                                    <>
+                                        No courses yet —{" "}
+                                        <Link
+                                            href="/courses"
+                                            style={{ color: "var(--accent-indigo)" }}
+                                        >
+                                            create one
+                                        </Link>{" "}
+                                        to build a corpus per subject.
+                                    </>
+                                ) : (
+                                    "Filing this paper under a course grounds future predictions on that subject's full history."
+                                )}
+                            </p>
+                        </div>
 
                         {/* Submit Button */}
                         <button

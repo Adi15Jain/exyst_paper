@@ -10,7 +10,11 @@ import Banner from "@/components/ui/Banner";
 import EmptyState from "@/components/ui/EmptyState";
 import Spinner from "@/components/ui/Spinner";
 import { useAuth } from "@/lib/auth-context";
-import { documents as documentsApi, DocumentData } from "@/lib/api";
+import {
+    documents as documentsApi,
+    courses as coursesApi,
+    DocumentData,
+} from "@/lib/api";
 
 export default function DocumentsPage() {
     const router = useRouter();
@@ -18,6 +22,10 @@ export default function DocumentsPage() {
     const [docs, setDocs] = useState<DocumentData[]>([]);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
+    // Set when arriving from a course card ("View papers →").
+    const courseId =
+        typeof router.query.course === "string" ? router.query.course : undefined;
+    const [courseName, setCourseName] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState(false);
     const [reloadKey, setReloadKey] = useState(0);
@@ -75,14 +83,26 @@ export default function DocumentsPage() {
         setLoadError(false);
 
         documentsApi
-            .list(page, 10)
+            .list(page, 10, courseId)
             .then((data) => {
                 setDocs(data.documents);
                 setTotal(data.total);
             })
             .catch(() => setLoadError(true))
             .finally(() => setLoading(false));
-    }, [user, authLoading, page, router, reloadKey]);
+    }, [user, authLoading, page, router, reloadKey, courseId]);
+
+    // Show which course is being filtered, so the view isn't silently narrowed.
+    useEffect(() => {
+        if (!courseId) {
+            setCourseName(null);
+            return;
+        }
+        coursesApi
+            .get(courseId)
+            .then((c) => setCourseName(c.name))
+            .catch(() => setCourseName(null));
+    }, [courseId]);
 
     if (authLoading || !user) return null;
 
@@ -135,8 +155,33 @@ export default function DocumentsPage() {
                                     margin: 0,
                                 }}
                             >
-                                {total} document{total !== 1 ? "s" : ""} total
+                                {total} document{total !== 1 ? "s" : ""}
+                                {courseId ? " in this course" : " total"}
                             </p>
+                            {courseId && (
+                                <p
+                                    style={{
+                                        margin: "4px 0 0",
+                                        fontSize: "0.8rem",
+                                        color: "var(--text-secondary)",
+                                    }}
+                                >
+                                    🎓 {courseName || "Course"} ·{" "}
+                                    <button
+                                        onClick={() => router.push("/documents")}
+                                        style={{
+                                            background: "none",
+                                            border: "none",
+                                            color: "var(--accent-indigo)",
+                                            cursor: "pointer",
+                                            fontSize: "0.8rem",
+                                            padding: 0,
+                                        }}
+                                    >
+                                        show all
+                                    </button>
+                                </p>
+                            )}
                         </div>
                         <button
                             className="btn-primary"
