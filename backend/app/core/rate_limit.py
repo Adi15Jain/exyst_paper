@@ -1,55 +1,20 @@
 """
-Lightweight in-process rate limiting.
+Per-IP rate limiting, shared across instances.
 
-A sliding-window limiter keyed by client IP + bucket name. Kept in memory so it
-works on serverless/single-instance deployments (e.g. Vercel) without a Redis
-dependency. This is brute-force friction for auth endpoints, not a distributed
-rate limiter — across many instances each instance enforces its own window.
+Counters live in Postgres (see app/core/shared_state.py), so N serverless
+replicas enforce ONE limit rather than each keeping a private in-memory window
+— previously an attacker could get N× the allowance simply by being load
+balanced around.
+
+Fails open: if the database is unreachable the request is allowed through and a
+warning is logged. Rate limiting is friction, not an authorization control, and
+it must never be the reason the API goes down.
 """
-
-import time
-from collections import defaultdict, deque
 
 from fastapi import Request
 
 from app.core.exceptions import RateLimitError
-
-
-class SlidingWindowRateLimiter:
-    """Tracks request timestamps per key within a rolling time window."""
-
-    def __init__(self, max_requests: int, window_seconds: float):
-        self.max_requests = max_requests
-        self.window_seconds = window_seconds
-        self._hits: dict[str, deque[float]] = defaultdict(deque)
-
-    def check(self, key: str) -> None:
-        """Record a hit for ``key``; raise RateLimitError if over the limit."""
-        now = time.monotonic()
-        cutoff = now - self.window_seconds
-        hits = self._hits[key]
-
-        while hits and hits[0] <= cutoff:
-            hits.popleft()
-
-        if len(hits) >= self.max_requests:
-            retry_after = max(1, int(self.window_seconds - (now - hits[0])))
-            raise RateLimitError(retry_after=retry_after)
-
-        hits.append(now)
-
-        # Opportunistic cleanup so idle keys don't accumulate forever.
-        if len(self._hits) > 10_000:
-            self._evict_empty()
-
-    def _evict_empty(self) -> None:
-        empty = [k for k, v in self._hits.items() if not v]
-        for k in empty:
-            del self._hits[k]
-
-    def reset(self) -> None:
-        """Clear all tracked state (used in tests)."""
-        self._hits.clear()
+from app.core.shared_state import increment_counter
 
 
 def _client_ip(request: Request) -> str:
@@ -67,11 +32,17 @@ def rate_limit(bucket: str, max_requests: int, window_seconds: float):
     Usage:
         @router.post("/login", dependencies=[Depends(rate_limit("login", 5, 60))])
     """
-    limiter = SlidingWindowRateLimiter(max_requests, window_seconds)
 
     async def dependency(request: Request) -> None:
-        limiter.check(f"{bucket}:{_client_ip(request)}")
+        # NOTE: the counter deliberately uses its own database session (inside
+        # increment_counter) rather than the request's. The request session is
+        # rolled back when an endpoint raises — and a *failed* login raising 401
+        # is precisely the case we most need to count. Sharing the session would
+        # roll the increment back and make brute-force limiting useless.
+        hits = await increment_counter(bucket, _client_ip(request), window_seconds)
 
-    # Expose the limiter so tests can reset it between cases.
-    dependency.limiter = limiter  # type: ignore[attr-defined]
+        # 0 means the counter failed (fail open).
+        if hits and hits > max_requests:
+            raise RateLimitError(retry_after=int(window_seconds))
+
     return dependency

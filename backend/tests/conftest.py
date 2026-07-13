@@ -4,11 +4,12 @@ Test fixtures and configuration.
 
 import asyncio
 import uuid
-from typing import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Generator
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.main import app
 
@@ -30,11 +31,17 @@ async def _create_schema() -> AsyncGenerator[None, None]:
     httpx ASGITransport used by the `client` fixture does not run lifespan
     (startup/shutdown) events. Without this, every DB-backed endpoint 500s with
     "no such table" / "relation does not exist".
+
+    Requires a Postgres with pgvector available (the `vector_chunks` table uses
+    the `vector` column type) — see the README for the local test-DB recipe.
     """
+    from sqlalchemy import text
+
     from app.db.session import engine
     from app.models import Base
 
     async with engine.begin() as conn:
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
     yield
     async with engine.begin() as conn:
@@ -42,16 +49,72 @@ async def _create_schema() -> AsyncGenerator[None, None]:
     await engine.dispose()
 
 
-@pytest.fixture(autouse=True)
-def _reset_rate_limits() -> Generator:
-    """
-    Reset auth rate limiters before each test so the per-IP windows from one
-    test don't bleed into the next (every test hits the API from the same host).
-    """
-    from app.api.v1.auth import login_rate_limit, register_rate_limit
+@pytest_asyncio.fixture
+async def db_session() -> AsyncGenerator["AsyncSession", None]:
+    """A database session for tests that exercise services directly."""
+    from app.db.session import async_session_factory
 
-    login_rate_limit.limiter.reset()
-    register_rate_limit.limiter.reset()
+    async with async_session_factory() as session:
+        yield session
+        await session.rollback()
+
+
+class FakeEmbedder:
+    """
+    Deterministic embedder for tests — no API calls.
+
+    Hashes tokens into a bag-of-words vector and L2-normalizes it, so texts
+    sharing words land near each other under cosine distance. Good enough to
+    assert that retrieval ranks related text above unrelated text; it says
+    nothing about real embedding quality.
+    """
+
+    def __init__(self, dim: int | None = None) -> None:
+        from app.ai.embeddings import EMBEDDING_DIM
+
+        self.dim = dim or EMBEDDING_DIM
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        import hashlib
+        import math
+        import re
+
+        vectors = []
+        for text in texts:
+            vec = [0.0] * self.dim
+            for token in re.findall(r"[a-z0-9]+", text.lower()):
+                digest = hashlib.sha256(token.encode()).digest()
+                idx = int.from_bytes(digest[:4], "big") % self.dim
+                vec[idx] += 1.0
+
+            norm = math.sqrt(sum(v * v for v in vec))
+            if norm == 0:
+                # Zero vectors have undefined cosine distance; use a fixed unit vector.
+                vec[0] = 1.0
+                norm = 1.0
+            vectors.append([v / norm for v in vec])
+
+        return vectors
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _reset_shared_state() -> AsyncGenerator[None, None]:
+    """
+    Clear the shared rate-limit counters and LLM cache before each test.
+
+    Both now live in Postgres rather than process memory, and every test hits
+    the API from the same client host — so without this, one test's rate-limit
+    window bleeds into the next and unrelated tests start seeing 429s.
+    """
+    from sqlalchemy import delete
+
+    from app.db.session import async_session_factory
+    from app.models import LLMCacheEntry, RateLimitCounter
+
+    async with async_session_factory() as session:
+        await session.execute(delete(RateLimitCounter))
+        await session.execute(delete(LLMCacheEntry))
+        await session.commit()
     yield
 
 

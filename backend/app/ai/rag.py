@@ -1,292 +1,273 @@
 """
-ChromaDB-based RAG (Retrieval-Augmented Generation) pipeline.
+pgvector-backed RAG (Retrieval-Augmented Generation) store.
 
-Stores historical question paper content as vector embeddings, enabling:
-- Semantic similarity search across past questions
-- Context retrieval for more accurate predictions
-- Topic clustering and trend analysis
+Stores historical questions and syllabus topics as embeddings in Postgres
+(`vector_chunks`), enabling semantic retrieval of relevant past questions to
+ground prediction prompts.
+
+Replaces the previous embedded-ChromaDB store, which could not work on
+serverless (its on-disk index vanished between invocations, and the package
+blew the bundle size limit). Keeping vectors in the existing database also
+means:
+
+  * retrieval is filtered by ``user_id`` — one user's questions can never be
+    retrieved into another user's prediction prompt;
+  * similarity is a true cosine similarity (``1 - cosine_distance``), not the
+    ``1 - L2`` approximation the old store used;
+  * chunks are removed automatically when their document is deleted.
+
+RAG is always optional: if embeddings are unavailable (no API key, provider
+error), indexing and retrieval degrade to no-ops and prediction proceeds
+without retrieved context.
 """
 
-import os
 from typing import Any
+from uuid import UUID
 
-# chromadb (and its onnxruntime embedding stack) is too large for serverless
-# deployments, so it is excluded from the Vercel runtime requirements. All
-# callers already wrap RAGPipeline usage in try/except and fall back to
-# non-RAG behaviour, so a missing chromadb just disables RAG features.
-try:
-    import chromadb
-    from chromadb.config import Settings as ChromaSettings
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
-    CHROMADB_AVAILABLE = True
-except ImportError:  # pragma: no cover - exercised only in slim deployments
-    chromadb = None  # type: ignore[assignment]
-    ChromaSettings = None  # type: ignore[assignment,misc]
-
-    CHROMADB_AVAILABLE = False
-
-from app.config import get_settings
+from app.ai.embeddings import Embedder, get_embedder
 from app.core.logging import get_logger
+from app.models import ChunkKind, VectorChunk
 
 logger = get_logger(__name__)
 
-# Collection names
-QUESTIONS_COLLECTION = "exam_questions"
-TOPICS_COLLECTION = "syllabus_topics"
+# Retrieval below this cosine similarity is noise, not context.
+MIN_SIMILARITY = 0.3
 
 
-class RAGPipeline:
-    """
-    Vector-based retrieval pipeline using ChromaDB.
+class RAGStore:
+    """Semantic index over a user's historical questions and syllabus topics."""
 
-    Stores question embeddings and retrieves similar historical questions
-    to augment prediction prompts with relevant examples.
-    """
+    def __init__(self, embedder: Embedder | None = None) -> None:
+        # Injectable so tests can supply a deterministic embedder.
+        self._embedder = embedder or get_embedder()
 
-    def __init__(self):
-        if not CHROMADB_AVAILABLE:
-            raise RuntimeError(
-                "chromadb is not installed — RAG features are disabled in this deployment"
-            )
+    # --- Indexing ---
 
-        settings = get_settings()
-        persist_dir = os.path.join(settings.OUTPUTS_DIR, "chromadb")
-        os.makedirs(persist_dir, exist_ok=True)
-
-        self.client = chromadb.PersistentClient(
-            path=persist_dir,
-            settings=ChromaSettings(anonymized_telemetry=False),
-        )
-
-        # Question embeddings collection
-        self.questions_collection = self.client.get_or_create_collection(
-            name=QUESTIONS_COLLECTION,
-            metadata={"description": "Historical exam questions with topic metadata"},
-        )
-
-        # Syllabus topics collection
-        self.topics_collection = self.client.get_or_create_collection(
-            name=TOPICS_COLLECTION,
-            metadata={"description": "Syllabus topics for semantic matching"},
-        )
-
-    def index_questions(
+    async def index_questions(
         self,
+        db: AsyncSession,
+        user_id: UUID,
+        document_id: UUID,
         questions: list[dict[str, Any]],
-        document_id: str,
         session: str = "unknown",
     ) -> int:
         """
-        Index extracted questions into the vector store.
+        Embed and store extracted questions. Returns the number indexed.
 
-        Args:
-            questions: List of question dicts with 'question_text', 'topic', 'marks'.
-            document_id: Source document ID for filtering.
-            session: Academic session (e.g., "2023-24").
-
-        Returns:
-            Number of questions indexed.
+        Idempotent: re-indexing the same document overwrites the same rows
+        (stable chunk_key), so a re-run never duplicates context.
         """
-        if not questions:
-            return 0
-
-        documents = []
-        metadatas: list[chromadb.Metadata] = []
-        ids = []
+        texts: list[str] = []
+        rows: list[dict[str, Any]] = []
 
         for i, q in enumerate(questions):
             text = q.get("question_text", q.get("text", ""))
             if not text or len(text.strip()) < 5:
                 continue
 
-            doc_text = f"{q.get('topic', '')} | {text}"
-            documents.append(doc_text)
-
-            metadatas.append({
+            topic = q.get("topic", "unknown")
+            # Prefixing with the topic mirrors the retrieval query shape
+            # (topic names), which measurably improves matching.
+            texts.append(f"{topic} | {text}")
+            rows.append({
+                "user_id": user_id,
                 "document_id": document_id,
-                "session": session,
-                "topic": q.get("topic", "unknown"),
-                "marks": str(q.get("marks", 0)),
-                "question_type": q.get("question_type", "medium"),
-                "question_number": str(q.get("question_number", i + 1)),
+                "kind": ChunkKind.QUESTION.value,
+                "chunk_key": f"{document_id}:question:{session}:{i}",
+                "content": text,
+                "chunk_metadata": {
+                    "topic": topic,
+                    "session": session,
+                    "marks": str(q.get("marks", 0)),
+                    "question_type": q.get("question_type", "medium"),
+                    "question_number": str(q.get("question_number", i + 1)),
+                },
             })
 
-            ids.append(f"{document_id}_{session}_{i}")
+        return await self._embed_and_upsert(db, texts, rows)
 
-        if not documents:
-            return 0
-
-        try:
-            self.questions_collection.upsert(
-                documents=documents,
-                metadatas=metadatas,
-                ids=ids,
-            )
-
-            logger.info(
-                "questions_indexed",
-                count=len(documents),
-                document_id=document_id,
-                session=session,
-            )
-            return len(documents)
-
-        except Exception as e:
-            logger.error("question_indexing_failed", error=str(e))
-            return 0
-
-    def index_topics(
+    async def index_topics(
         self,
+        db: AsyncSession,
+        user_id: UUID,
+        document_id: UUID,
         topics: list[str],
-        document_id: str,
         unit: str = "unknown",
     ) -> int:
-        """
-        Index syllabus topics into the vector store.
-
-        Args:
-            topics: List of topic strings.
-            document_id: Source document ID.
-            unit: The unit/module these topics belong to.
-
-        Returns:
-            Number of topics indexed.
-        """
-        if not topics:
-            return 0
-
-        documents = []
-        metadatas: list[chromadb.Metadata] = []
-        ids = []
+        """Embed and store syllabus topics. Returns the number indexed."""
+        texts: list[str] = []
+        rows: list[dict[str, Any]] = []
 
         for i, topic in enumerate(topics):
-            if not topic.strip():
+            if not topic or not topic.strip():
                 continue
-            documents.append(topic)
-            metadatas.append({
+            texts.append(topic)
+            rows.append({
+                "user_id": user_id,
                 "document_id": document_id,
-                "unit": unit,
+                "kind": ChunkKind.TOPIC.value,
+                "chunk_key": f"{document_id}:topic:{unit}:{i}",
+                "content": topic,
+                "chunk_metadata": {"unit": unit},
             })
-            ids.append(f"{document_id}_topic_{unit}_{i}")
 
-        if not documents:
-            return 0
+        return await self._embed_and_upsert(db, texts, rows)
 
-        try:
-            self.topics_collection.upsert(
-                documents=documents,
-                metadatas=metadatas,
-                ids=ids,
-            )
-
-            logger.info(
-                "topics_indexed",
-                count=len(documents),
-                document_id=document_id,
-            )
-            return len(documents)
-
-        except Exception as e:
-            logger.error("topic_indexing_failed", error=str(e))
-            return 0
-
-    def retrieve_similar_questions(
+    async def _embed_and_upsert(
         self,
+        db: AsyncSession,
+        texts: list[str],
+        rows: list[dict[str, Any]],
+    ) -> int:
+        if not rows:
+            return 0
+
+        embeddings = await self._embedder.embed(texts)
+
+        for row, embedding in zip(rows, embeddings, strict=True):
+            row["embedding"] = embedding
+
+        stmt = insert(VectorChunk).values(rows)
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_vector_chunks_chunk_key",
+            set_={
+                "content": stmt.excluded.content,
+                "chunk_metadata": stmt.excluded.chunk_metadata,
+                "embedding": stmt.excluded.embedding,
+            },
+        )
+        await db.execute(stmt)
+
+        logger.info("chunks_indexed", count=len(rows), kind=rows[0]["kind"])
+        return len(rows)
+
+    # --- Retrieval ---
+
+    async def retrieve_similar_questions(
+        self,
+        db: AsyncSession,
+        user_id: UUID,
         query: str,
         n_results: int = 10,
-        topic_filter: str | None = None,
+        document_id: UUID | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Retrieve similar historical questions using semantic search.
+        Semantically retrieve a user's historical questions matching ``query``.
 
-        Args:
-            query: The query text (e.g., a topic name or question).
-            n_results: Maximum number of results to return.
-            topic_filter: Optional topic to filter by.
-
-        Returns:
-            List of similar question dicts with scores.
+        Always scoped to ``user_id``; optionally narrowed to one document.
         """
-        try:
-            where_filter: dict[str, Any] | None = None
-            if topic_filter:
-                where_filter = {"topic": {"$eq": topic_filter}}
+        chunks = await self._search(
+            db,
+            user_id=user_id,
+            kind=ChunkKind.QUESTION,
+            query=query,
+            n_results=n_results,
+            document_id=document_id,
+        )
+        return [
+            {
+                "text": content,
+                "topic": (metadata or {}).get("topic", ""),
+                "session": (metadata or {}).get("session", ""),
+                "marks": (metadata or {}).get("marks", ""),
+                "similarity_score": similarity,
+            }
+            for content, metadata, similarity in chunks
+        ]
 
-            results = self.questions_collection.query(
-                query_texts=[query],
-                n_results=n_results,
-                where=where_filter,
-            )
-
-            similar_questions = []
-            if results and results["documents"] and results["documents"][0]:
-                for i, doc in enumerate(results["documents"][0]):
-                    metadata = results["metadatas"][0][i] if results["metadatas"] else {}
-                    distance = results["distances"][0][i] if results["distances"] else 0
-
-                    similar_questions.append({
-                        "text": doc,
-                        "topic": metadata.get("topic", ""),
-                        "session": metadata.get("session", ""),
-                        "marks": metadata.get("marks", ""),
-                        # Convert distance to similarity
-                        "similarity_score": round(1 - distance, 3),
-                    })
-
-            logger.info(
-                "similar_questions_retrieved",
-                query_length=len(query),
-                results_count=len(similar_questions),
-            )
-
-            return similar_questions
-
-        except Exception as e:
-            logger.warning("retrieval_failed", error=str(e))
-            return []
-
-    def retrieve_related_topics(
+    async def retrieve_related_topics(
         self,
+        db: AsyncSession,
+        user_id: UUID,
         query: str,
         n_results: int = 5,
+        document_id: UUID | None = None,
     ) -> list[dict[str, Any]]:
-        """
-        Find semantically related syllabus topics.
+        """Semantically retrieve a user's syllabus topics related to ``query``."""
+        chunks = await self._search(
+            db,
+            user_id=user_id,
+            kind=ChunkKind.TOPIC,
+            query=query,
+            n_results=n_results,
+            document_id=document_id,
+        )
+        return [
+            {
+                "topic": content,
+                "unit": (metadata or {}).get("unit", ""),
+                "similarity_score": similarity,
+            }
+            for content, metadata, similarity in chunks
+        ]
 
-        Args:
-            query: Topic or concept to find related topics for.
-            n_results: Max results.
-
-        Returns:
-            List of related topic dicts with similarity scores.
-        """
-        try:
-            results = self.topics_collection.query(
-                query_texts=[query],
-                n_results=n_results,
-            )
-
-            related = []
-            if results and results["documents"] and results["documents"][0]:
-                for i, doc in enumerate(results["documents"][0]):
-                    metadata = results["metadatas"][0][i] if results["metadatas"] else {}
-                    distance = results["distances"][0][i] if results["distances"] else 0
-
-                    related.append({
-                        "topic": doc,
-                        "unit": metadata.get("unit", ""),
-                        "similarity_score": round(1 - distance, 3),
-                    })
-
-            return related
-
-        except Exception as e:
-            logger.warning("topic_retrieval_failed", error=str(e))
+    async def _search(
+        self,
+        db: AsyncSession,
+        user_id: UUID,
+        kind: ChunkKind,
+        query: str,
+        n_results: int,
+        document_id: UUID | None = None,
+    ) -> list[tuple[str, dict[str, Any] | None, float]]:
+        if not query or not query.strip():
             return []
 
-    def get_collection_stats(self) -> dict[str, Any]:
-        """Get statistics about the vector store."""
-        return {
-            "total_questions": self.questions_collection.count(),
-            "total_topics": self.topics_collection.count(),
-        }
+        embeddings = await self._embedder.embed([query])
+        if not embeddings:
+            return []
+        query_vector = embeddings[0]
+
+        # cosine_distance is in [0, 2]; similarity = 1 - distance.
+        distance = VectorChunk.embedding.cosine_distance(query_vector)
+        stmt = (
+            select(VectorChunk.content, VectorChunk.chunk_metadata, distance.label("distance"))
+            .where(
+                VectorChunk.user_id == user_id,
+                VectorChunk.kind == kind.value,
+            )
+            .order_by(distance)
+            .limit(n_results)
+        )
+        if document_id is not None:
+            stmt = stmt.where(VectorChunk.document_id == document_id)
+
+        result = await db.execute(stmt)
+
+        hits = []
+        for content, metadata, dist in result.all():
+            similarity = round(1.0 - float(dist), 3)
+            if similarity >= MIN_SIMILARITY:
+                hits.append((content, metadata, similarity))
+
+        logger.info(
+            "chunks_retrieved",
+            kind=kind.value,
+            query_length=len(query),
+            results_count=len(hits),
+        )
+        return hits
+
+    # --- Maintenance ---
+
+    async def count(
+        self,
+        db: AsyncSession,
+        user_id: UUID,
+        kind: ChunkKind | None = None,
+    ) -> int:
+        """How many chunks this user has indexed (optionally of one kind)."""
+        stmt = (
+            select(func.count())
+            .select_from(VectorChunk)
+            .where(VectorChunk.user_id == user_id)
+        )
+        if kind is not None:
+            stmt = stmt.where(VectorChunk.kind == kind.value)
+        result = await db.execute(stmt)
+        return result.scalar() or 0
+

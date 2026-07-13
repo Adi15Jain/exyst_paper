@@ -4,10 +4,12 @@
 # install from pyproject.toml instead: pip install -e ".[dev]"
 #
 # Intentionally excluded from the serverless bundle:
-#   - chromadb / onnxruntime: pushes the function past Vercel's 250 MB limit,
-#     and /tmp-persisted vectors don't survive between invocations anyway.
-#     app/ai/rag.py degrades gracefully when chromadb is absent (RAG disabled).
 #   - dev tooling (pytest, ruff, mypy, coverage): not needed at runtime.
+#
+# RAG now runs on pgvector inside the existing Postgres (the `pgvector` client
+# below is a thin SQLAlchemy type adapter). The old embedded chromadb was
+# removed: its onnxruntime stack blew Vercel's 250 MB function limit and its
+# /tmp vector store did not survive between invocations.
 
 # --- Web framework ---
 fastapi>=0.115.0
@@ -24,6 +26,9 @@ google-genai>=1.0.0
 pdfminer.six>=20231228
 PyMuPDF>=1.24.0
 
+# --- RAG vector store (pgvector in Postgres) ---
+pgvector>=0.3.0
+
 # --- Auth & security ---
 PyJWT>=2.8.0
 bcrypt>=4.0.0
@@ -36,3 +41,6 @@ email-validator>=2.1.0
 
 # --- Logging ---
 structlog>=24.1.0
+
+# --- HTTP client (Vercel Blob object storage) ---
+httpx>=0.27.0

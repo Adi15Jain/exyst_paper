@@ -29,28 +29,6 @@ class _FakeLLM:
 class TestDocumentProcessor:
     """Tests for PDF processing pipeline."""
 
-    def test_extract_metadata_university(self):
-        """Should extract university name from text."""
-        processor = DocumentProcessor()
-        text = "TEERTHANKER MAHAVEER UNIVERSITY – MORADABAD\nB.Tech Examination"
-        metadata = processor.extract_metadata(text)
-        assert metadata["university"] is not None
-        assert "UNIVERSITY" in metadata["university"]
-
-    def test_extract_metadata_course_code(self):
-        """Should extract course code."""
-        processor = DocumentProcessor()
-        text = "Course Code: EAI602\nMax. Marks: 60"
-        metadata = processor.extract_metadata(text)
-        assert metadata["course_code"] == "EAI602"
-
-    def test_extract_metadata_max_marks(self):
-        """Should extract max marks."""
-        processor = DocumentProcessor()
-        text = "Max. Marks: 60\nTime: 3 Hours"
-        metadata = processor.extract_metadata(text)
-        assert metadata["max_marks"] == "60"
-
     def test_split_papers_by_session(self):
         """Should split text by academic session markers."""
         processor = DocumentProcessor()
@@ -96,8 +74,16 @@ class TestEvaluator:
         """Well-formed questions should score high."""
         evaluator = Evaluator()
         paper = self._make_paper([
-            {"text": "Explain the concept of fitness function in genetic algorithms.", "marks": 10, "topic": "GA"},
-            {"text": "Compare crossover and mutation operators with examples.", "marks": 10, "topic": "GA"},
+            {
+                "text": "Explain the concept of fitness function in genetic algorithms.",
+                "marks": 10,
+                "topic": "GA",
+            },
+            {
+                "text": "Compare crossover and mutation operators with examples.",
+                "marks": 10,
+                "topic": "GA",
+            },
         ])
         syllabus = SyllabusStructure()
         report = evaluator.evaluate(paper, syllabus, {"frequency": []})

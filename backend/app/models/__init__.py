@@ -7,6 +7,7 @@ All models use UUID primary keys and include audit timestamps.
 import enum
 import uuid
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Column,
     DateTime,
@@ -16,10 +17,13 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, relationship
+
+from app.ai.embeddings import EMBEDDING_DIM
 
 
 class Base(DeclarativeBase):
@@ -45,6 +49,8 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     hashed_password = Column(String(255), nullable=False)
     name = Column(String(255), nullable=False)
+    # Bumped on logout to invalidate all outstanding refresh tokens.
+    token_version = Column(Integer, nullable=False, default=0, server_default="0")
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -184,3 +190,107 @@ class Prediction(Base):
 
     def __repr__(self) -> str:
         return f"<Prediction {self.id} confidence={self.overall_confidence}>"
+
+
+# --- RAG vector store ---
+
+
+class ChunkKind(enum.StrEnum):
+    """What a stored vector represents."""
+    QUESTION = "question"
+    TOPIC = "topic"
+
+
+class VectorChunk(Base):
+    """
+    A single embedded piece of text (a historical question or a syllabus topic).
+
+    Replaces the former embedded ChromaDB store: keeping vectors in Postgres
+    means they survive serverless cold starts, are shared across instances, and
+    — critically — can be filtered by user_id so retrieval can never surface
+    another user's questions.
+
+    Rows are removed by the ON DELETE CASCADE on document_id (no ORM
+    relationship: the pipeline writes these, nothing needs to traverse them).
+    """
+
+    __tablename__ = "vector_chunks"
+    __table_args__ = (
+        # Stable natural key makes re-indexing the same document idempotent.
+        UniqueConstraint("chunk_key", name="uq_vector_chunks_chunk_key"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    document_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    kind = Column(String(20), nullable=False, index=True)
+    chunk_key = Column(String(200), nullable=False)
+    content = Column(Text, nullable=False)
+    chunk_metadata = Column(JSONB, nullable=True)
+    embedding = Column(Vector(EMBEDDING_DIM), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return f"<VectorChunk {self.kind} {self.chunk_key}>"
+
+
+# --- Cross-instance shared state (see app/core/shared_state.py) ---
+
+
+class LLMCacheEntry(Base):
+    """
+    A cached LLM response, keyed by a hash of (system prompt, prompt, temperature).
+
+    Lives in Postgres rather than process memory so a cache hit on one
+    serverless instance serves all of them — each hit skips a multi-second
+    Gemini call. Rows expire by `expires_at` and are swept opportunistically.
+    """
+
+    __tablename__ = "llm_cache"
+
+    cache_key = Column(String(64), primary_key=True)  # sha256 hex
+    response = Column(Text, nullable=False)
+    model = Column(String(100), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+    def __repr__(self) -> str:
+        return f"<LLMCacheEntry {self.cache_key[:12]}>"
+
+
+class RateLimitCounter(Base):
+    """
+    A hit counter for one (bucket, client, time-window) triple.
+
+    Used for per-IP auth/upload limits and for per-model Gemini RPM pacing.
+    Shared across instances so N replicas enforce one limit and share one
+    provider quota, instead of each keeping its own private count.
+    """
+
+    __tablename__ = "rate_limit_counters"
+
+    bucket = Column(String(64), primary_key=True)       # e.g. "login", "llm_rpm"
+    client_key = Column(String(200), primary_key=True)  # e.g. an IP, or a model name
+    window_start = Column(DateTime(timezone=True), primary_key=True)
+    hits = Column(Integer, nullable=False, default=0)
+
+    def __repr__(self) -> str:
+        return f"<RateLimitCounter {self.bucket}:{self.client_key} hits={self.hits}>"

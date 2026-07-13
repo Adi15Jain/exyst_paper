@@ -17,6 +17,7 @@ from app.core.exceptions import DocumentNotFoundError, DocumentUploadError
 from app.core.logging import get_logger
 from app.models import Analysis, Document, ProcessingStatus
 from app.schemas.document import DocumentListResponse, DocumentResponse, DocumentUploadResponse
+from app.services.storage import delete_stored_file, save_upload
 
 logger = get_logger(__name__)
 
@@ -57,6 +58,30 @@ class DocumentService:
         if not file_content.startswith(b"%PDF-"):
             raise DocumentUploadError("File is not a valid PDF")
 
+        # Dedup: an identical file this user already uploaded and analyzed is
+        # returned as-is rather than re-running the (LLM-expensive) pipeline.
+        # Scoped to the owner on purpose — reusing another user's analysis
+        # would leak their document's existence and needs a shared-corpus
+        # design first (see ROADMAP 3a).
+        file_hash = hashlib.sha256(file_content).hexdigest()
+        existing = await self._find_analyzed_duplicate(user_id, file_hash, db)
+        if existing is not None:
+            logger.info(
+                "document_upload_deduplicated",
+                document_id=str(existing.id),
+                user_id=str(user_id),
+                file_hash=file_hash,
+            )
+            return DocumentUploadResponse(
+                id=cast(Any, existing.id),
+                filename=cast(Any, existing.original_filename),
+                file_size_bytes=cast(Any, existing.file_size_bytes),
+                status=existing.status.value,
+                uploaded_at=cast(Any, existing.uploaded_at),
+                message="This file was already analyzed — reusing the existing results.",
+                deduplicated=True,
+            )
+
         # Save file. Strip any directory components from the client-supplied
         # filename so embedded "../" sequences can't escape the upload dir.
         timestamp = int(time.time())
@@ -64,22 +89,8 @@ class DocumentService:
         safe_name = base_name.lstrip(".") or "upload.pdf"
         stored_filename = f"{timestamp}_{safe_name}"
 
-        # Create user-specific directory
-        user_dir = os.path.join(self.settings.UPLOAD_DIR, str(user_id))
-        os.makedirs(user_dir, exist_ok=True)
-
-        file_path = os.path.join(user_dir, stored_filename)
-        # Defence in depth: ensure the resolved path stays inside the user dir.
-        if os.path.commonpath(
-            [os.path.realpath(file_path), os.path.realpath(user_dir)]
-        ) != os.path.realpath(user_dir):
-            raise DocumentUploadError("Invalid filename")
-
-        with open(file_path, "wb") as f:
-            f.write(file_content)
-
-        # Compute file hash
-        file_hash = hashlib.sha256(file_content).hexdigest()
+        # Local disk on long-lived hosts; Vercel Blob (URL) on serverless.
+        file_path = await save_upload(f"{user_id}/{stored_filename}", file_content)
 
         # Create DB record
         document = Document(
@@ -110,6 +121,31 @@ class DocumentService:
             uploaded_at=cast(Any, document.uploaded_at),
         )
 
+    async def _find_analyzed_duplicate(
+        self,
+        user_id: UUID,
+        file_hash: str,
+        db: AsyncSession,
+    ) -> Document | None:
+        """
+        Find this user's most recent copy of an identical file that already
+        has a COMPLETED analysis. Documents that failed or never ran are not
+        reused — the user is retrying for a reason.
+        """
+        stmt = (
+            select(Document)
+            .join(Analysis)
+            .where(
+                Document.user_id == user_id,
+                Document.file_hash == file_hash,
+                Analysis.status == ProcessingStatus.COMPLETED,
+            )
+            .order_by(Document.uploaded_at.desc())
+            .limit(1)
+        )
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_document(
         self,
         document_id: UUID,
@@ -132,6 +168,67 @@ class DocumentService:
         if not doc:
             raise DocumentNotFoundError(str(document_id))
 
+        return doc
+
+    async def delete_document(
+        self,
+        document_id: UUID,
+        user_id: UUID,
+        db: AsyncSession,
+    ) -> None:
+        """
+        Delete a document, its analyses/predictions, and its stored file.
+
+        Raises:
+            DocumentNotFoundError: If not found or belongs to another user.
+        """
+        # Load the full relationship tree so the ORM cascade can delete child
+        # rows without triggering lazy loads (which fail under asyncio).
+        stmt = (
+            select(Document)
+            .where(
+                Document.id == document_id,
+                Document.user_id == user_id,
+            )
+            .options(
+                selectinload(Document.analyses).selectinload(Analysis.predictions)
+            )
+        )
+        result = await db.execute(stmt)
+        doc = result.scalar_one_or_none()
+
+        if not doc:
+            raise DocumentNotFoundError(str(document_id))
+
+        file_path = doc.file_path
+        await db.delete(doc)
+        await db.flush()
+
+        # Only after the rows are gone; best-effort (never blocks the delete).
+        await delete_stored_file(file_path)
+
+        logger.info(
+            "document_deleted",
+            document_id=str(document_id),
+            user_id=str(user_id),
+        )
+
+    async def rename_document(
+        self,
+        document_id: UUID,
+        user_id: UUID,
+        new_name: str,
+        db: AsyncSession,
+    ) -> Document:
+        """
+        Change a document's display name (original_filename).
+
+        Raises:
+            DocumentNotFoundError: If not found or belongs to another user.
+        """
+        doc = await self.get_document(document_id, user_id, db)
+        doc.original_filename = new_name.strip()
+        await db.flush()
         return doc
 
     async def list_documents(

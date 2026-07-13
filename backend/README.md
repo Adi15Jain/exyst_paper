@@ -9,7 +9,7 @@
 - **ORM**: SQLAlchemy 2.0 (async)
 - **Database**: Neon PostgreSQL (Serverless Cloud)
 - **Migrations**: Alembic
-- **AI/LLM**: Google AI Studio / Gemini (`google-genai`), ChromaDB (RAG)
+- **AI/LLM**: Google AI Studio / Gemini (`google-genai`), pgvector (RAG)
 - **Auth**: JWT (PyJWT) + Direct bcrypt hashing (Python 3.14 compatible)
 - **Logging**: structlog (JSON)
 - **Testing**: pytest + pytest-asyncio
@@ -38,7 +38,7 @@ app/
 │
 ├── ai/                  # AI pipeline
 │   ├── llm_client.py    # Centralized LLM client (retry, structured output)
-│   ├── rag.py           # ChromaDB vector store (index, retrieve)
+│   ├── rag.py           # pgvector vector store (index, retrieve)
 │   ├── evaluation.py    # Multi-factor confidence scoring
 │   └── pipelines/
 │       ├── document_processor.py  # PDF extraction + metadata
@@ -119,11 +119,12 @@ app/
 
 ### Local Development (Recommended)
 
-1. **Activate the Virtual Environment**:
+1. **Activate the Virtual Environment** (one venv at the repo root serves the
+   whole project — don't create a second one inside `backend/`):
 
     ```bash
-    # From the backend directory
-    python -m venv venv && source venv/bin/activate
+    # From the repo root
+    python -m venv .venv && source .venv/bin/activate
     ```
 
 2. **Install Dependencies**:
@@ -197,16 +198,3 @@ ruff check app/
 mypy app/ --ignore-missing-imports
 ```
 
-## IDE / Type Checker Setup (Pyrefly)
-
-If you are using the **Pyrefly** type checker extension in your IDE and see false-positive missing import warnings, ensure the type checker points to your local virtual environment:
-
-1. Ensure `pyrefly.toml` exists at the root of the workspace.
-2. In `backend/pyproject.toml`, the config section `[tool.pyrefly]` is already set up to point to the local `venv`:
-    ```toml
-    [tool.pyrefly]
-    python_interpreter = "venv/bin/python"
-    python-interpreter-path = "venv/bin/python"
-    search_path = ["."]
-    ```
-3. If errors persist, reload your IDE window (e.g. `⌘ + Shift + P` -> `Developer: Reload Window` in VS Code) to clear the in-memory cache.

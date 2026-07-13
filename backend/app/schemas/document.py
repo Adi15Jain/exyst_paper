@@ -5,7 +5,12 @@ Document schemas.
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+class DocumentRenameRequest(BaseModel):
+    """Rename a document (display name only; the stored file is untouched)."""
+    original_filename: str = Field(min_length=1, max_length=500)
 
 
 class DocumentUploadResponse(BaseModel):
@@ -16,6 +21,9 @@ class DocumentUploadResponse(BaseModel):
     status: str
     uploaded_at: datetime
     message: str = "Document uploaded successfully"
+    # True when an identical file was already analyzed and its existing
+    # document was returned instead of re-running the pipeline.
+    deduplicated: bool = False
 
     model_config = {"from_attributes": True}
 

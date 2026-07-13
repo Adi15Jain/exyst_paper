@@ -1,7 +1,7 @@
-# Environment
+# Environment (NEVER commit secrets) — but keep the placeholder template
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # Python
 __pycache__/
@@ -17,7 +17,6 @@ build/
 venv/
 .venv/
 env/
-.env.*
 
 # IDE
 .vscode/
@@ -38,8 +37,9 @@ outputs/
 .coverage
 htmlcov/
 
-# Alembic
-alembic/versions/*.pyc
+# Tool caches
+.mypy_cache/
+.ruff_cache/
 
 # Databases
 *.db

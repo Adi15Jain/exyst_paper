@@ -22,9 +22,16 @@ class LoginRequest(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    """JWT token pair response."""
+    """
+    JWT token response.
+
+    refresh_token is populated only when the client supplied its refresh token
+    in the request body (non-browser API clients). Browser clients receive the
+    refresh token exclusively via an httpOnly cookie, so an XSS payload that
+    calls /auth/refresh cannot read a long-lived credential from the response.
+    """
     access_token: str
-    refresh_token: str
+    refresh_token: str | None = None
     token_type: str = "bearer"
 
 
@@ -41,3 +48,25 @@ class UserResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class UpdateProfileRequest(BaseModel):
+    """Change the current user's display name."""
+    name: str = Field(min_length=1, max_length=255)
+
+
+class ChangePasswordRequest(BaseModel):
+    """Change password while signed in (requires the current password)."""
+    current_password: str
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Request a password reset link."""
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    """Set a new password using a reset token from the emailed link."""
+    token: str
+    new_password: str = Field(min_length=8, max_length=128)

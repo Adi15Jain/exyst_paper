@@ -24,6 +24,12 @@ from pydantic import BaseModel
 from app.config import get_settings
 from app.core.exceptions import LLMError, LLMOutputParsingError
 from app.core.logging import get_logger
+from app.core.shared_state import (
+    cache_get,
+    cache_set,
+    counter_value,
+    increment_counter,
+)
 
 logger = get_logger(__name__)
 
@@ -36,33 +42,32 @@ T = TypeVar("T", bound=BaseModel)
 MODEL_FALLBACK_CHAIN = [
     "gemini-2.5-flash",       # Best quality, 5 RPM, 20 RPD
     "gemini-2.5-flash-lite",  # Good quality, 10 RPM, 20 RPD
-    "gemma-4-31b-it",         # Good quality, 15 RPM, UNLIMITED RPD
+    "gemma-3-27b-it",         # Good quality, higher free-tier quota
 ]
 
 # Models suited for simpler tasks (classification, validation, extraction)
 LITE_MODELS = [
     "gemini-2.5-flash-lite",  # 10 RPM, 20 RPD — good for structured JSON
-    "gemma-4-31b-it",         # 15 RPM, unlimited RPD — great fallback
+    "gemma-3-27b-it",         # higher free-tier quota — great fallback
 ]
 
 # ---------------------------------------------------------------------------
-# In-memory prompt cache — avoids re-calling the API for identical prompts
+# Prompt cache + per-model request tracking.
+#
+# Both live in Postgres (app/core/shared_state.py), not process memory: a cache
+# hit on one serverless instance must serve all of them (it skips a multi-second
+# Gemini call), and RPM pacing only protects the free-tier quota if every
+# instance counts against the same total.
 # ---------------------------------------------------------------------------
-_prompt_cache: dict[str, tuple[str, float]] = {}  # hash -> (response_content, timestamp)
 CACHE_TTL_SECONDS = 3600  # Cache responses for 1 hour
-
-# ---------------------------------------------------------------------------
-# Per-model request tracking for smart rotation
-# ---------------------------------------------------------------------------
-_model_request_counts: dict[str, list[float]] = {}  # model -> list of timestamps
+RPM_WINDOW_SECONDS = 60
+RPM_BUCKET = "llm_rpm"
 
 # Free-tier limits
 MODEL_LIMITS = {
     "gemini-2.5-flash": {"rpm": 5, "rpd": 20},
     "gemini-2.5-flash-lite": {"rpm": 10, "rpd": 20},
-    "gemini-3.5-flash": {"rpm": 5, "rpd": 20},
-    "gemma-4-31b-it": {"rpm": 15, "rpd": 1500},  # Effectively unlimited
-    "gemma-4-26b-it": {"rpm": 15, "rpd": 1500},
+    "gemma-3-27b-it": {"rpm": 15, "rpd": 1500},  # Effectively unlimited
 }
 
 
@@ -72,53 +77,35 @@ def _cache_key(prompt: str, system_prompt: str | None, temperature: float) -> st
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def _get_cached_response(key: str) -> str | None:
-    """Check if a valid cached response exists."""
-    if key in _prompt_cache:
-        content, timestamp = _prompt_cache[key]
-        if time.time() - timestamp < CACHE_TTL_SECONDS:
-            return content
-        else:
-            del _prompt_cache[key]  # Expired
-    return None
+async def _get_cached_response(key: str) -> str | None:
+    """Check if a valid cached response exists (shared across instances)."""
+    return await cache_get(key)
 
 
-def _set_cache(key: str, content: str) -> None:
-    """Store a response in cache."""
-    _prompt_cache[key] = (content, time.time())
-    # Evict old entries if cache gets too large
-    if len(_prompt_cache) > 200:
-        oldest_key = min(_prompt_cache, key=lambda k: _prompt_cache[k][1])
-        del _prompt_cache[oldest_key]
+async def _set_cache(key: str, content: str, model: str | None = None) -> None:
+    """Store a response in the shared cache."""
+    await cache_set(key, content, ttl_seconds=CACHE_TTL_SECONDS, model=model)
 
 
-def _track_request(model: str) -> None:
-    """Record a request timestamp for rate tracking."""
-    if model not in _model_request_counts:
-        _model_request_counts[model] = []
-    _model_request_counts[model].append(time.time())
+async def _track_request(model: str) -> None:
+    """Record a request against this model's shared RPM window."""
+    await increment_counter(RPM_BUCKET, model, RPM_WINDOW_SECONDS)
 
 
-def _get_rpm_usage(model: str) -> int:
-    """Get number of requests in the last 60 seconds for a model."""
-    if model not in _model_request_counts:
-        return 0
-    cutoff = time.time() - 60
-    _model_request_counts[model] = [
-        t for t in _model_request_counts[model] if t > cutoff
-    ]
-    return len(_model_request_counts[model])
+async def _get_rpm_usage(model: str) -> int:
+    """Requests made against a model in the current 60s window, all instances."""
+    return await counter_value(RPM_BUCKET, model, RPM_WINDOW_SECONDS)
 
 
-def _pick_best_model(preferred: str, fallback_chain: list[str]) -> str:
+async def _pick_best_model(preferred: str, fallback_chain: list[str]) -> str:
     """
     Pick the best available model based on current rate limit usage.
     Tries the preferred model first, then falls back through the chain.
     """
     # Check if preferred model has room
     limits = MODEL_LIMITS.get(preferred, {"rpm": 5, "rpd": 20})
-    usage = _get_rpm_usage(preferred)
-    if usage < limits["rpm"] - 1:  # Leave 1 slot buffer
+    preferred_usage = await _get_rpm_usage(preferred)
+    if preferred_usage < limits["rpm"] - 1:  # Leave 1 slot buffer
         return preferred
 
     # Try fallbacks
@@ -126,13 +113,13 @@ def _pick_best_model(preferred: str, fallback_chain: list[str]) -> str:
         if model == preferred:
             continue
         limits = MODEL_LIMITS.get(model, {"rpm": 5, "rpd": 20})
-        usage = _get_rpm_usage(model)
+        usage = await _get_rpm_usage(model)
         if usage < limits["rpm"] - 1:
             logger.info(
                 "model_fallback",
                 preferred=preferred,
                 fallback=model,
-                preferred_rpm_usage=_get_rpm_usage(preferred),
+                preferred_rpm_usage=preferred_usage,
             )
             return model
 
@@ -267,7 +254,7 @@ class LLMClient:
         # --- Check cache first ---
         if use_cache:
             cache_key = _cache_key(prompt, system_prompt, temperature)
-            cached = _get_cached_response(cache_key)
+            cached = await _get_cached_response(cache_key)
             if cached is not None:
                 logger.info("llm_cache_hit", cache_key=cache_key[:12])
                 return LLMResponse(
@@ -283,7 +270,7 @@ class LLMClient:
         # rotate through the rest of the fallback chain. A model that is overloaded
         # (503/UNAVAILABLE) or rate-limited is therefore NOT retried in place — the
         # next attempt uses a different model, which is far more likely to succeed.
-        first_choice = _pick_best_model(self.preferred_model, self.fallback_chain)
+        first_choice = await _pick_best_model(self.preferred_model, self.fallback_chain)
         candidates: list[str] = []
         for m in [first_choice, self.preferred_model, *self.fallback_chain]:
             if m not in candidates:
@@ -322,8 +309,8 @@ class LLMClient:
 
                 config = types.GenerateContentConfig(**config_kwargs)
 
-                # Track the request
-                _track_request(model)
+                # Track the request against the shared RPM window
+                await _track_request(model)
 
                 # Use run_in_executor for sync SDK, bounded by a timeout so a
                 # hung request raises (and is retried) instead of stalling.
@@ -363,9 +350,9 @@ class LLMClient:
                     preferred=self.preferred_model,
                 )
 
-                # Cache the successful response
+                # Cache the successful response (shared across instances)
                 if use_cache:
-                    _set_cache(cache_key, content.strip())
+                    await _set_cache(cache_key, content.strip(), model=model)
 
                 return LLMResponse(
                     content=content.strip(),

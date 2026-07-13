@@ -25,19 +25,18 @@ class AnalysisStatusResponse(BaseModel):
     error_message: str | None = None
 
 
-class SyllabusStructure(BaseModel):
-    """Extracted syllabus data."""
-    course_title: str | None = None
-    units: list[dict[str, Any]] = []
-    total_topics: int = 0
+class QuestionPaperExcerpt(BaseModel):
+    """
+    One historical paper as stored by the analysis pipeline.
 
-
-class QuestionPaperSummary(BaseModel):
-    """Summary of an extracted question paper."""
-    academic_session: str | None = None
-    total_questions: int = 0
-    max_marks: int | None = None
-    topics_covered: list[str] = []
+    Mirrors exactly what `AnalysisService` writes to `Analysis.question_papers`
+    (`{"session", "text"}`). It previously declared a different shape
+    (`academic_session`/`total_questions`/`max_marks`/`topics_covered`), none of
+    which the stored dicts contain — so every paper serialized to all-defaults
+    and the real session/text was silently dropped from the API response.
+    """
+    session: str = "Unknown"
+    text: str = ""
 
 
 class AnalysisResponse(BaseModel):
@@ -46,9 +45,11 @@ class AnalysisResponse(BaseModel):
     document_id: UUID
     status: str
 
-    # Extracted structures
-    syllabus_structure: SyllabusStructure | None = None
-    question_papers: list[QuestionPaperSummary] = []
+    # Extracted structures. `syllabus_structure` is the serialized
+    # app.ai.pipelines.syllabus_analyzer.SyllabusStructure — kept as a free-form
+    # dict here rather than re-declaring a second, lossy copy of that schema.
+    syllabus_structure: dict[str, Any] | None = None
+    question_papers: list[QuestionPaperExcerpt] = []
     topic_frequency: list[TopicFrequency] = []
     pattern_analysis: dict[str, Any] | None = None
 

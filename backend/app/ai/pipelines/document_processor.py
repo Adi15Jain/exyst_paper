@@ -4,10 +4,9 @@ Document processing pipeline.
 Handles PDF text extraction with multi-strategy fallback:
   1. pdfminer.six (best for text-based PDFs)
   2. PyMuPDF/fitz (fallback for complex layouts)
-
-Also extracts metadata (year, course code, marks) from the text.
 """
 
+import io
 import re
 
 from pdfminer.high_level import extract_pages
@@ -24,17 +23,24 @@ class DocumentProcessor:
     Processes uploaded PDF documents into structured text.
     """
 
-    def extract_pages_text(self, pdf_path: str) -> list[dict[str, str]]:
+    def extract_pages_text(self, pdf_source: str | bytes) -> list[dict[str, str]]:
         """
         Extract text from each page of a PDF.
+
+        Args:
+            pdf_source: A local file path, or the raw PDF bytes (used when the
+                file lives in object storage rather than on local disk).
 
         Returns:
             List of dicts with 'page_number' and 'text' keys.
         """
         pages = []
+        is_bytes = isinstance(pdf_source, bytes)
+        source_label = "<bytes>" if is_bytes else pdf_source
 
         try:
-            for i, page_layout in enumerate(extract_pages(pdf_path)):
+            pdfminer_input = io.BytesIO(pdf_source) if is_bytes else pdf_source
+            for i, page_layout in enumerate(extract_pages(pdfminer_input)):
                 text = ""
                 for element in page_layout:
                     if isinstance(element, LTTextContainer):
@@ -49,7 +55,7 @@ class DocumentProcessor:
 
             logger.info(
                 "pdf_extraction_complete",
-                path=pdf_path,
+                path=source_label,
                 strategy="pdfminer",
                 total_pages=len(pages),
             )
@@ -57,24 +63,27 @@ class DocumentProcessor:
         except Exception as e:
             logger.warning(
                 "pdfminer_extraction_failed",
-                path=pdf_path,
+                path=source_label,
                 error=str(e),
             )
             # Fallback to PyMuPDF
-            pages = self._extract_with_pymupdf(pdf_path)
+            pages = self._extract_with_pymupdf(pdf_source)
 
         if not pages:
-            raise PDFParsingError(f"No text could be extracted from PDF: {pdf_path}")
+            raise PDFParsingError(f"No text could be extracted from PDF: {source_label}")
 
         return pages
 
-    def _extract_with_pymupdf(self, pdf_path: str) -> list[dict[str, str]]:
+    def _extract_with_pymupdf(self, pdf_source: str | bytes) -> list[dict[str, str]]:
         """Fallback extraction using PyMuPDF."""
         try:
             import fitz  # PyMuPDF
 
             pages = []
-            doc = fitz.open(pdf_path)
+            if isinstance(pdf_source, bytes):
+                doc = fitz.open(stream=pdf_source, filetype="pdf")
+            else:
+                doc = fitz.open(pdf_source)
 
             for i, page in enumerate(doc):
                 text = page.get_text().strip()
@@ -88,7 +97,7 @@ class DocumentProcessor:
 
             logger.info(
                 "pdf_extraction_complete",
-                path=pdf_path,
+                path="<bytes>" if isinstance(pdf_source, bytes) else pdf_source,
                 strategy="pymupdf",
                 total_pages=len(pages),
             )
@@ -97,24 +106,6 @@ class DocumentProcessor:
 
         except Exception as e:
             raise PDFParsingError(f"Both PDF extraction strategies failed: {str(e)}")
-
-    def extract_metadata(self, text: str) -> dict[str, str | None]:
-        """
-        Extract exam metadata from text using regex patterns.
-
-        Extracts: university, course_code, subject, max_marks, academic_session, duration.
-        """
-        metadata: dict[str, str | None] = {
-            "university": self._extract_university(text),
-            "course_code": self._extract_course_code(text),
-            "subject": self._extract_subject(text),
-            "max_marks": self._extract_max_marks(text),
-            "academic_session": self._extract_session(text),
-            "duration": self._extract_duration(text),
-        }
-
-        logger.info("metadata_extracted", **{k: v for k, v in metadata.items() if v})
-        return metadata
 
     # A paper boundary is an examination header (more reliable than a bare year, which
     # can recur inside a paper). Falls back to a bare academic session if no header exists.
@@ -162,74 +153,3 @@ class DocumentProcessor:
 
         logger.info("papers_split", num_papers=len(papers))
         return papers
-
-    # --- Private extraction helpers ---
-
-    def _extract_university(self, text: str) -> str | None:
-        patterns = [
-            r"([A-Z][A-Z\s]+UNIVERSITY[A-Z\s–-]*)",
-            r"TEERTHANKER MAHAVEER UNIVERSITY",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text)
-            if match:
-                return match.group(1).strip()
-        return None
-
-    def _extract_course_code(self, text: str) -> str | None:
-        patterns = [
-            r"Course\s*Code\s*[:：]\s*([A-Z]+\d+)",
-            r"\b([A-Z]{2,}\d{3,})\b",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text)
-            if match:
-                return match.group(1)
-        return None
-
-    def _extract_subject(self, text: str) -> str | None:
-        """Extract subject from context — not hardcoded to any specific subject."""
-        # Look for explicit subject/course name markers
-        patterns = [
-            r"Subject\s*[:：]\s*(.+?)(?:\n|$)",
-            r"Course\s*(?:Title|Name)\s*[:：]\s*(.+?)(?:\n|$)",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                return match.group(1).strip()
-        return None
-
-    def _extract_max_marks(self, text: str) -> str | None:
-        patterns = [
-            r"Max\.?\s*Marks?\s*[:：]\s*(\d+)",
-            r"Maximum\s*Marks?\s*[:：]\s*(\d+)",
-            r"Total\s*Marks?\s*[:：]\s*(\d+)",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                return match.group(1)
-        return None
-
-    def _extract_session(self, text: str) -> str | None:
-        patterns = [
-            r"(20\d{2}[-–]\d{2})",
-            r"((?:May|Dec|Jan|Jun|Jul|Nov)\s+20\d{2})",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text)
-            if match:
-                return match.group(1)
-        return None
-
-    def _extract_duration(self, text: str) -> str | None:
-        patterns = [
-            r"Time\s*[:：]\s*([\d.]+\s*(?:Hours?|Hrs?))",
-            r"Duration\s*[:：]\s*([\d.]+\s*(?:Hours?|Hrs?))",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                return match.group(1)
-        return None

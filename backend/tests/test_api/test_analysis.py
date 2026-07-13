@@ -82,7 +82,7 @@ async def test_run_analysis_ownership_isolation(client, auth, monkeypatch):
 async def test_background_runner_marks_completed(client, auth, monkeypatch):
     """The scheduled background task should persist a COMPLETED analysis on success."""
 
-    async def fake_pipeline(self, analysis, document, progress_callback=None):
+    async def fake_pipeline(self, analysis, document, db, progress_callback=None):
         analysis.status = ProcessingStatus.COMPLETED
         analysis.num_papers_found = 2
         document.status = ProcessingStatus.COMPLETED
@@ -105,7 +105,7 @@ async def test_background_runner_marks_completed(client, auth, monkeypatch):
 async def test_background_runner_persists_failure(client, auth, monkeypatch):
     """A failing pipeline should leave the analysis in FAILED with a message."""
 
-    async def boom_pipeline(self, analysis, document, progress_callback=None):
+    async def boom_pipeline(self, analysis, document, db, progress_callback=None):
         raise AnalysisError("pipeline exploded")
 
     monkeypatch.setattr(AnalysisService, "_run_pipeline", boom_pipeline)
@@ -119,3 +119,33 @@ async def test_background_runner_persists_failure(client, auth, monkeypatch):
     body = status.json()
     assert body["status"] == "failed"
     assert "exploded" in (body["error_message"] or "")
+
+
+@pytest.mark.asyncio
+async def test_stale_processing_analysis_is_reported_failed(client, auth, monkeypatch):
+    """
+    A PROCESSING analysis older than the timeout is reaped as FAILED.
+
+    On serverless the background task can be killed mid-run, leaving the row
+    PROCESSING forever and the UI polling indefinitely.
+    """
+
+    async def _noop(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(analysis_service, "run_analysis_background", _noop)
+    # Anything already running for more than a moment counts as dead.
+    monkeypatch.setattr(
+        analysis_service.settings, "ANALYSIS_TIMEOUT_SECONDS", -1.0, raising=False
+    )
+
+    doc_id = await _upload(client, auth["headers"])
+    run = await client.post(f"/api/v1/analysis/{doc_id}/run", headers=auth["headers"])
+    assert run.status_code == 202
+    assert run.json()["status"] == "processing"
+
+    status = await client.get(f"/api/v1/analysis/{doc_id}/status", headers=auth["headers"])
+    assert status.status_code == 200
+    body = status.json()
+    assert body["status"] == "failed"
+    assert "timed out" in (body["error_message"] or "").lower()

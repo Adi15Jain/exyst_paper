@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
+from app.core.rate_limit import rate_limit
 from app.db.session import get_db
 from app.dependencies import get_current_user_id
 from app.schemas.analysis import AnalysisResponse, AnalysisStatusResponse
@@ -17,8 +18,16 @@ router = APIRouter(prefix="/analysis", tags=["Analysis"])
 
 analysis_service = AnalysisService()
 
+# Each run costs several LLM calls — protect the provider quota.
+run_rate_limit = rate_limit("analysis_run", max_requests=10, window_seconds=600)
 
-@router.post("/{document_id}/run", response_model=AnalysisStatusResponse, status_code=202)
+
+@router.post(
+    "/{document_id}/run",
+    response_model=AnalysisStatusResponse,
+    status_code=202,
+    dependencies=[Depends(run_rate_limit)],
+)
 async def run_analysis(
     document_id: UUID,
     background_tasks: BackgroundTasks,

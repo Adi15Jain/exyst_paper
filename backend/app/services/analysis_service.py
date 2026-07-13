@@ -12,7 +12,7 @@ Coordinates:
 
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -23,12 +23,13 @@ from app.ai.pipelines.classifier import Classifier
 from app.ai.pipelines.document_processor import DocumentProcessor
 from app.ai.pipelines.pattern_analyzer import PatternAnalyzer
 from app.ai.pipelines.syllabus_analyzer import SyllabusAnalyzer
-from app.ai.rag import RAGPipeline
+from app.ai.rag import RAGStore
 from app.config import get_settings
 from app.core.exceptions import AnalysisError, DocumentNotFoundError
 from app.core.logging import get_logger
 from app.db.session import async_session_factory
 from app.models import Analysis, Document, ProcessingStatus
+from app.services.storage import read_stored_file
 
 logger = get_logger(__name__)
 
@@ -109,7 +110,7 @@ class AnalysisService:
                 return
 
             try:
-                await self._run_pipeline(analysis, document)
+                await self._run_pipeline(analysis, document, session)
                 await session.commit()
             except Exception as e:
                 # Persist the FAILED state in a clean transaction.
@@ -166,13 +167,14 @@ class AnalysisService:
         await db.flush()
         document.status = ProcessingStatus.PROCESSING
 
-        await self._run_pipeline(analysis, document, progress_callback)
+        await self._run_pipeline(analysis, document, db, progress_callback)
         return analysis
 
     async def _run_pipeline(
         self,
         analysis: Analysis,
         document: Document,
+        db: AsyncSession,
         progress_callback: ProgressCallback = None,
     ) -> Analysis:
         """
@@ -189,10 +191,12 @@ class AnalysisService:
                 await progress_callback(stage, progress, detail)
 
         try:
-            # 2. Extract text from PDF
+            # 2. Extract text from PDF (fetched via the storage layer so it
+            # works for both local paths and object-storage URLs)
             await _emit("pdf_extraction", 10, "Extracting text from PDF...")
             logger.info("analysis_stage", stage="pdf_extraction", document_id=str(document_id))
-            pages = self.doc_processor.extract_pages_text(document.file_path)
+            file_bytes = await read_stored_file(document.file_path)
+            pages = self.doc_processor.extract_pages_text(file_bytes)
             analysis.num_pages_processed = len(pages)
 
             # 3. Classify pages
@@ -229,8 +233,10 @@ class AnalysisService:
 
             # 7. Index into RAG vector store for semantic retrieval
             await _emit("rag_indexing", 65, "Indexing questions into vector store...")
-            questions_indexed = self._index_into_rag(
-                document_id=str(document_id),
+            questions_indexed = await self._index_into_rag(
+                db=db,
+                user_id=document.user_id,
+                document_id=document_id,
                 frequency_result=frequency_result,
                 syllabus_structure=syllabus_structure,
             )
@@ -276,39 +282,53 @@ class AnalysisService:
 
             raise AnalysisError(f"Analysis pipeline failed: {str(e)}")
 
-    def _index_into_rag(
+    async def _index_into_rag(
         self,
-        document_id: str,
+        db: AsyncSession,
+        user_id: UUID,
+        document_id: UUID,
         frequency_result: dict[str, Any],
         syllabus_structure: Any,
     ) -> int:
-        """Index extracted questions and syllabus topics into the RAG vector store."""
+        """
+        Index extracted questions and syllabus topics into the RAG vector store.
+
+        RAG is optional: an embedding failure disables retrieval for this
+        document but must never fail the analysis. The writes run inside a
+        savepoint so a database error here rolls back only the chunk inserts,
+        leaving the surrounding analysis transaction usable.
+        """
         try:
-            rag = RAGPipeline()
+            rag = RAGStore()
             total_indexed = 0
 
-            # Index questions from each paper
-            questions_by_paper = frequency_result.get("questions_by_paper", [])
-            topic_by_session = frequency_result.get("topic_by_session", {})
-            sessions = sorted(topic_by_session.keys()) if topic_by_session else []
+            async with db.begin_nested():
+                # Index questions from each paper
+                questions_by_paper = frequency_result.get("questions_by_paper", [])
+                topic_by_session = frequency_result.get("topic_by_session", {})
+                sessions = sorted(topic_by_session.keys()) if topic_by_session else []
 
-            for i, paper_questions in enumerate(questions_by_paper):
-                session = sessions[i] if i < len(sessions) else f"paper_{i}"
-                indexed = rag.index_questions(
-                    questions=paper_questions,
-                    document_id=document_id,
-                    session=session,
-                )
-                total_indexed += indexed
-
-            # Index syllabus topics
-            if syllabus_structure and syllabus_structure.units:
-                for unit in syllabus_structure.units:
-                    rag.index_topics(
-                        topics=unit.topics,
+                for i, paper_questions in enumerate(questions_by_paper):
+                    session = sessions[i] if i < len(sessions) else f"paper_{i}"
+                    indexed = await rag.index_questions(
+                        db=db,
+                        user_id=user_id,
                         document_id=document_id,
-                        unit=f"unit_{unit.unit_number}",
+                        questions=paper_questions,
+                        session=session,
                     )
+                    total_indexed += indexed
+
+                # Index syllabus topics
+                if syllabus_structure and syllabus_structure.units:
+                    for unit in syllabus_structure.units:
+                        await rag.index_topics(
+                            db=db,
+                            user_id=user_id,
+                            document_id=document_id,
+                            topics=unit.topics,
+                            unit=f"unit_{unit.unit_number}",
+                        )
 
             return total_indexed
 
@@ -322,7 +342,15 @@ class AnalysisService:
         user_id: UUID,
         db: AsyncSession,
     ) -> Analysis | None:
-        """Get the latest analysis for a document."""
+        """
+        Get the latest analysis for a document.
+
+        Also reaps analyses that have been PROCESSING past the timeout. On
+        serverless, `BackgroundTasks` are killed when the invocation ends, so
+        a run can silently die and leave the row PROCESSING forever — the UI
+        would poll it indefinitely. Surfacing it as FAILED lets the user retry.
+        This is a stopgap until a durable job queue lands (ROADMAP 1.3).
+        """
         stmt = (
             select(Analysis)
             .join(Document)
@@ -334,4 +362,40 @@ class AnalysisService:
             .limit(1)
         )
         result = await db.execute(stmt)
-        return result.scalar_one_or_none()
+        analysis = result.scalar_one_or_none()
+
+        if analysis is not None and self._is_stale(analysis):
+            await self._mark_stale_failed(analysis, db)
+
+        return analysis
+
+    def _is_stale(self, analysis: Analysis) -> bool:
+        """True if this analysis has been PROCESSING beyond the timeout."""
+        if analysis.status != ProcessingStatus.PROCESSING:
+            return False
+        if analysis.created_at is None:
+            return False
+
+        age = datetime.now(UTC) - analysis.created_at
+        return age > timedelta(seconds=self.settings.ANALYSIS_TIMEOUT_SECONDS)
+
+    async def _mark_stale_failed(self, analysis: Analysis, db: AsyncSession) -> None:
+        """Persist a stuck analysis (and its document) as FAILED."""
+        message = (
+            "Analysis timed out — the job did not complete. This can happen if "
+            "the server restarted mid-run. Please try again."
+        )
+        analysis.status = ProcessingStatus.FAILED
+        analysis.error_message = message
+
+        document = await db.get(Document, analysis.document_id)
+        if document is not None and document.status == ProcessingStatus.PROCESSING:
+            document.status = ProcessingStatus.FAILED
+            document.error_message = message
+
+        await db.flush()
+        logger.warning(
+            "analysis_marked_stale",
+            analysis_id=str(analysis.id),
+            document_id=str(analysis.document_id),
+        )
